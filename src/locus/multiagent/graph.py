@@ -932,6 +932,23 @@ class StateGraph(BaseModel):
 
         return False
 
+    def _dynamic_route_source(
+        self,
+        current_node: str,
+        command: Command | None = None,
+    ) -> str | None:
+        """Name what decides the next nodes, mirroring :meth:`_get_next_nodes`.
+
+        Returns ``"command"`` for a ``Command(goto=...)``, ``"conditional_edge"``
+        when a conditional edge leaves ``current_node``, else ``None`` (static edges).
+        """
+        if command and command.has_goto:
+            return "command"
+        for cond_edge in self.conditional_edges:
+            if cond_edge.source_id == current_node:
+                return "conditional_edge"
+        return None
+
     def _get_next_nodes(
         self,
         current_node: str,
@@ -1145,6 +1162,7 @@ class StateGraph(BaseModel):
             # Lazy import — observability is opt-in.
             from locus.observability.emit import (  # noqa: PLC0415
                 EV_GRAPH_NODE_COMPLETED,
+                EV_GRAPH_NODE_ROUTED,
                 EV_GRAPH_NODE_STARTED,
                 emit,
             )
@@ -1323,6 +1341,19 @@ class StateGraph(BaseModel):
                     # Determine next nodes
                     node_next = self._get_next_nodes(node_id, state, command)
                     next_nodes.extend(node_next)
+                    # A Command goto or a conditional edge is a dynamic
+                    # decision the node events cannot show; regular
+                    # edges are static and emit nothing.
+                    route_source = self._dynamic_route_source(node_id, command)
+                    if route_source is not None:
+                        await emit(
+                            EV_GRAPH_NODE_ROUTED,
+                            graph_id=self.id,
+                            node_id=node_id,
+                            targets=list(node_next),
+                            iteration=iterations,
+                            source=route_source,
+                        )
 
                 # Check for interrupt_after
                 if node_id in cfg.interrupt_after:

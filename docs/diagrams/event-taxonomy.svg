@@ -49,7 +49,7 @@
     deepagent.*    deepagent.subagent.spawned deepagent/subagent.py:118; deepagent.fs.read deepagent/tools/filesystem.py:78; deepagent.todo.added deepagent/todos.py:112
     harness.*      harness.exec harness/evidence.py:87 (emit_sync)
     skills.*       skills.activated skills/plugin.py:418 (emit_sync)
-  Not drawn: EV_* constants with no emit site at the time of drawing (multiagent.graph.node.routed, a2a.task.processing,
+  Not drawn: EV_* constants with no emit site at the time of drawing (a2a.task.processing,
   rag.embedding.generated, rag.store.upsert, rag.store.search); router.* names, published by the goal router as literal StreamEvents outside the EV_ table
   (observability/router_events.py:64-231); the SpecialistStart/Complete, OrchestratorDecision, CausalNode/Edge and
   hook event classes core/events.py also declares (:457-557), which Agent.run never yields.

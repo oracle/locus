@@ -110,6 +110,7 @@ run id is bound, either by an active `run_context()` or by
 | `multiagent.handoff.completed` | `source_agent_id`, `target_agent_id`, `success`, `output_length` |
 | `multiagent.graph.node.started` | `graph_id`, `node_id`, `iteration`, `span_id`, `parallel`, `is_resuming` |
 | `multiagent.graph.node.completed` | `graph_id`, `node_id`, `span_id`, `status`, `duration_ms`, `parallel` |
+| `multiagent.graph.node.routed` | `graph_id`, `node_id` (the node the decision leaves), `targets`, `iteration`, `source` (`conditional_edge` or `command`); regular edges emit nothing |
 
 ### `composition.*` — pipelines
 
@@ -268,10 +269,9 @@ without storing either.
 
 ## Declared but not emitted
 
-Five constants in `src/locus/observability/emit.py` have no emission site
+Four constants in `src/locus/observability/emit.py` have no emission site
 today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
-(`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
-(`multiagent.graph.node.routed`), `EV_RAG_EMBEDDING_GENERATED`
+(`a2a.task.processing`), `EV_RAG_EMBEDDING_GENERATED`
 (`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`)
 and `EV_RAG_STORE_UPSERT` (`rag.store.upsert`). The unit test
 `tests/unit/test_emit_constants_have_sites.py` carries the same list and
