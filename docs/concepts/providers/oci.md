@@ -164,7 +164,10 @@ model id and chooses for you:
 Need to override? Instantiate the transport class directly —
 `OCIChatCompletionsModel` for V1, `OCIModel` for the SDK — instead of the
 `oci:` prefix. The notebook harness (`examples/config.py`) also honours
-`LOCUS_OCI_TRANSPORT=v1|sdk`.
+`LOCUS_OCI_TRANSPORT=v1|sdk`. Both classes take `reasoning_effort=`
+(`"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"`; unset sends nothing),
+which the gpt-6 family needs at `"none"` before it accepts function tools on
+the chat endpoint (see the gotchas below).
 
 For the **Responses transport**, instantiate `OCIResponsesModel`
 explicitly — it's opt-in, not selected by prefix. See the
@@ -293,6 +296,7 @@ built from a config carries them.
 | `compartment_id is required when auth_type= is set` | Principal auth on the V1/Responses transports cannot derive a compartment from a profile. Pass `compartment_id=` on the model (the SDK transport falls back to the profile's tenancy). |
 | Streaming yields one big chunk | DAC endpoint rejected `is_stream`. The fall-back path in `OCIModel.stream()` swallows the failure and emits the full response as one chunk. |
 | Cohere model fails on V1 | The `oci:` prefix already routes `cohere.*` ids to the SDK transport; if you built `OCIChatCompletionsModel` yourself, use `OCIModel` (in the notebooks, `LOCUS_OCI_TRANSPORT=sdk`). |
+| `400 Function tools with reasoning_effort are not supported for gpt-6… in /v1/chat/completions` | The gpt-6 family accepts function tools on the chat endpoint only with the reasoning effort set to `none`. Pass `reasoning_effort="none"` to `OCIChatCompletionsModel` or `OCIModel` (both transports take the same kwarg; the `oci:` prefix cannot). A model that does not accept `none` (`openai.gpt-6.2-sol` answers `Unsupported value`) needs `OCIResponsesModel` for tools. gpt-5.5 and earlier are not affected. |
 
 To list the models available in a region:
 

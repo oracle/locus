@@ -8,6 +8,18 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`reasoning_effort` on the OCI chat transports.** `OCIModel(reasoning_effort=...)`
+  (and the same kwarg on `complete()` / `stream()`, which wins for that call)
+  sets `reasoning_effort` on the `GenericChatRequest`, upper-cased for the
+  OCI SDK enum; `OCIChatCompletionsModel(reasoning_effort=...)` folds it into
+  `extra_body`. Unset sends nothing, as before. The gpt-6 family rejects
+  function tools on the chat endpoint unless the effort is `"none"`, so an
+  agent with tools on `openai.gpt-6-*` over either transport now has a switch
+  instead of a 400; a model that does not accept `"none"` (`openai.gpt-6.2-sol`)
+  still needs `OCIResponsesModel` for tools (#609).
+
 ### Documentation
 
 - The decision page no longer presents the Decisions API on OCI Generative AI

@@ -65,6 +65,17 @@ class OCIConfig(ModelConfig):
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     stop_sequences: list[str] = Field(default_factory=list)
+    reasoning_effort: str | None = Field(
+        default=None,
+        description=(
+            "Reasoning effort for reasoning models (``none``, ``minimal``, "
+            "``low``, ``medium``, ``high``), sent as ``reasoning_effort`` on the "
+            "GenericChatRequest. The accepted values depend on the model and are "
+            "validated by the server. None (default) sends nothing, so the "
+            "server's default applies. A ``reasoning_effort`` call kwarg "
+            "overrides it for that call. Cohere models ignore it."
+        ),
+    )
 
 
 class OCIModel(BaseModel):
@@ -108,6 +119,7 @@ class OCIModel(BaseModel):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         profile: str | None = None,
+        reasoning_effort: str | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialize OCI GenAI model.
@@ -136,6 +148,15 @@ class OCIModel(BaseModel):
                 because ``profile=`` is the natural name users reach for
                 — the previous behaviour silently swallowed it through
                 ``**kwargs`` and fell through to the ``DEFAULT`` profile.
+            reasoning_effort: Reasoning effort for reasoning models
+                (``"none"``, ``"minimal"``, ``"low"``, ``"medium"``,
+                ``"high"``; the server validates the set a model accepts).
+                ``None`` (default) sends nothing, so the server default
+                applies. The gpt-6 family rejects function tools on the chat
+                endpoint unless this is ``"none"`` (or the model runs through
+                ``OCIResponsesModel``). A ``reasoning_effort`` kwarg on
+                ``complete()`` / ``stream()`` overrides it for that call.
+                Cohere models ignore it.
             **kwargs: Additional model parameters
         """
         # ``profile=`` is the natural name; treat it as an alias.
@@ -179,6 +200,7 @@ class OCIModel(BaseModel):
             service_endpoint=service_endpoint,
             max_tokens=max_tokens,
             temperature=temperature,
+            reasoning_effort=reasoning_effort,
             **kwargs,
         )
         super().__init__(config=config)
@@ -248,6 +270,7 @@ class OCIModel(BaseModel):
         request_kwargs = {
             "max_tokens": kwargs.pop("max_tokens", self.config.max_tokens),
             "temperature": kwargs.pop("temperature", self.config.temperature),
+            "reasoning_effort": kwargs.pop("reasoning_effort", self.config.reasoning_effort),
             **kwargs,
         }
 
@@ -350,9 +373,10 @@ class OCIModel(BaseModel):
         converted_messages = self.provider.convert_messages(messages, model_id=self.config.model_id)
         converted_tools = self.provider.convert_tools(tools)
         request_kwargs = {
-            "max_tokens": self.config.max_tokens,
-            "temperature": self.config.temperature,
+            "max_tokens": kwargs.pop("max_tokens", self.config.max_tokens),
+            "temperature": kwargs.pop("temperature", self.config.temperature),
             "top_p": self.config.top_p,
+            "reasoning_effort": kwargs.pop("reasoning_effort", self.config.reasoning_effort),
             "model_id": self.config.model_id,
             "is_stream": True,
         }
