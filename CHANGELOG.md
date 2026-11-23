@@ -16,6 +16,10 @@ policy.
   so it follows the command. `tests/docs/test_error_hierarchy_diagram.py` keeps
   the errors page's hierarchy diagram equal to the classes and `kind` values in
   `locus.core.errors`, with subclasses defined elsewhere named in the prose.
+- **A SQLite report store.** `SqliteReportStore` in `locus.evaluation` keeps
+  evaluation reports in one SQLite file, so a local run has a history it can
+  query without a server. `report_store()` opens it from a `sqlite://<path>`
+  spec, so `locus eval run --store` and `locus eval trend` take it.
 
 ## [6.2.1] - 2026-11-20
 

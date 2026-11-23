@@ -816,7 +816,9 @@ class SqliteReportStore:
     figures in columns, so ``list()`` is a query rather than a read of every
     report, and the report itself as JSON. ``created_at`` is kept as
     fixed-width UTC text, so it sorts the way it reads. Each call opens its
-    own connection, so there is nothing to close.
+    own connection, so there is nothing to close. A ``put()`` with a
+    ``report_id`` already in the table raises ``sqlite3.IntegrityError``, as
+    ``OracleReportStore`` does; ``FileReportStore`` overwrites instead.
 
     Args:
         path: The database file; it and its directory are created on the
