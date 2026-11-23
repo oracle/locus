@@ -494,10 +494,20 @@ Every release follows this checklist. Do not skip steps.
 5. **Tag.** `git tag -a v<version> -m 'Release v<version>'` on the
    release PR's merge commit and push the tag. The CHANGELOG section at
    the tag is the record of what the wheel contains.
-6. **Publish.** Build the wheel (`hatch build`), verify the wheel
+6. **Triage secret-scanning alerts.** GitHub scans the merge commit
+   with custom patterns that key on variable names such as `*_API_KEY`
+   or `PASSWORD` rather than on the value, so a release that touches
+   tests or docs raises a batch of alerts. For each one, read the
+   flagged line at the merge commit. A fixture, placeholder, docstring
+   or type annotation is resolved as *used in tests* or *false
+   positive* with a comment naming the file and why. A real credential
+   is rotated first and resolved as *revoked*. Published test material
+   that has to stay in the tree is excluded by path in
+   `.github/secret_scanning.yml`, not resolved alert by alert.
+7. **Publish.** Build the wheel (`hatch build`), verify the wheel
    contents do not include compliance artifacts or test data, then
    upload.
-7. **Announce.** CHANGELOG entry ships with the release notes; any
+8. **Announce.** CHANGELOG entry ships with the release notes; any
    deprecations are called out again in the release announcement.
 
 See [`DEPRECATION.md`](DEPRECATION.md) for the full deprecation policy
