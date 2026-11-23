@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-11-23
+
 ### Added
 
 - **Skills placed where a prompt cache can reuse the conversation.**
