@@ -453,3 +453,30 @@ class TestCompleteEndToEndMocked:
         result = await model.complete([Message.user("Hi")])
         assert result.message.content == "Hi from OCI"
         assert result.stop_reason == "stop"
+
+
+class TestReasoningEffort:
+    """``reasoning_effort=`` is folded into ``extra_body`` for the chat endpoint."""
+
+    def _model(self, **kwargs):
+        with patch(
+            "locus.models.providers.oci.openai_compat._load_profile_config",
+            return_value={"tenancy": COMPARTMENT_OCID},
+        ):
+            return OCIChatCompletionsModel(
+                model="openai.gpt-6-luna", profile="MY_PROFILE", **kwargs
+            )
+
+    def test_default_sends_nothing(self):
+        assert self._model().config.extra_body is None
+
+    def test_kwarg_lands_in_extra_body(self):
+        assert self._model(reasoning_effort="none").config.extra_body == {
+            "reasoning_effort": "none"
+        }
+
+    def test_explicit_extra_body_key_wins_and_other_keys_survive(self):
+        model = self._model(
+            reasoning_effort="none", extra_body={"reasoning_effort": "low", "seed": 7}
+        )
+        assert model.config.extra_body == {"reasoning_effort": "low", "seed": 7}

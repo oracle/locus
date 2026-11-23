@@ -199,6 +199,45 @@ def _patch_client_and_provider(model: OCIModel, response: Any) -> tuple[Any, Any
     return client, provider
 
 
+class TestReasoningEffort:
+    """``reasoning_effort`` reaches the provider from the constructor or per call."""
+
+    def test_default_is_none(self) -> None:
+        assert OCIModel(model_id="openai.gpt-6-luna").config.reasoning_effort is None
+
+    @pytest.mark.asyncio
+    async def test_constructor_value_reaches_build_request(self) -> None:
+        m = OCIModel(model_id="openai.gpt-6-luna", reasoning_effort="none")
+        _, provider = _patch_client_and_provider(m, _make_oci_response())
+        await m.complete([Message.user("hi")])
+        assert provider.build_request.call_args.kwargs["reasoning_effort"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_call_kwarg_overrides_constructor_value(self) -> None:
+        m = OCIModel(model_id="openai.gpt-6-luna", reasoning_effort="none")
+        _, provider = _patch_client_and_provider(m, _make_oci_response())
+        await m.complete([Message.user("hi")], reasoning_effort="high")
+        assert provider.build_request.call_args.kwargs["reasoning_effort"] == "high"
+
+    @pytest.mark.asyncio
+    async def test_unset_passes_none(self) -> None:
+        m = OCIModel(model_id="openai.gpt-6-luna")
+        _, provider = _patch_client_and_provider(m, _make_oci_response())
+        await m.complete([Message.user("hi")])
+        assert provider.build_request.call_args.kwargs["reasoning_effort"] is None
+
+    @pytest.mark.asyncio
+    async def test_stream_passes_it_too(self) -> None:
+        m = OCIModel(model_id="openai.gpt-6-luna", reasoning_effort="none")
+        client, provider = _patch_client_and_provider(m, _make_oci_response())
+        client.chat = MagicMock(
+            return_value=SimpleNamespace(data=SimpleNamespace(events=lambda: iter(())))
+        )
+        async for _ in m.stream([Message.user("hi")]):
+            pass
+        assert provider.build_request.call_args.kwargs["reasoning_effort"] == "none"
+
+
 class TestComplete:
     @pytest.mark.asyncio
     async def test_returns_first_attempt_when_content_present(self) -> None:

@@ -623,6 +623,7 @@ class OCIChatCompletionsModel(OpenAIModel):
         base_url: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        reasoning_effort: str | None = None,
         on_request: RequestHook | None = None,
         on_response: ResponseHook | None = None,
         **kwargs: Any,
@@ -652,6 +653,15 @@ class OCIChatCompletionsModel(OpenAIModel):
                 this is automatically forwarded as
                 ``max_completion_tokens`` — see :class:`OpenAIModel`.
             temperature: Default sampling temperature.
+            reasoning_effort: Reasoning effort for reasoning models
+                (``"none"``, ``"minimal"``, ``"low"``, ``"medium"``,
+                ``"high"``; the server validates the set a model accepts).
+                ``None`` (default) sends nothing. Folded into ``extra_body``
+                as ``reasoning_effort``, so an explicit ``extra_body`` key of
+                the same name wins. The gpt-6 family rejects function tools
+                on the chat endpoint unless this is ``"none"``; a model that
+                does not accept ``"none"`` (``openai.gpt-6.2-sol``) needs
+                ``OCIResponsesModel`` for tools.
             on_request: Sync callable handed each outgoing :class:`httpx.Request`
                 after signing, before it is sent — ``request.content`` is the
                 JSON body. The seam for request-shape tests and for seeing what
@@ -699,10 +709,17 @@ class OCIChatCompletionsModel(OpenAIModel):
             "base_url",
             "max_tokens",
             "temperature",
+            "reasoning_effort",
             "on_request",
             "on_response",
         ):
             kwargs.pop(explicit, None)
+
+        if reasoning_effort is not None:
+            kwargs["extra_body"] = {
+                "reasoning_effort": reasoning_effort,
+                **(kwargs.get("extra_body") or {}),
+            }
 
         compartment_id = resolve_oci_compartment(
             compartment_id, profile=profile, config_file=config_file

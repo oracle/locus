@@ -139,6 +139,16 @@ class GenericProvider(OCIModelProvider):
         if stop:
             request.stop = stop
 
+        # Reasoning effort, when the caller set one. ``None`` sends nothing, so
+        # the server default applies; the gpt-6 family needs ``"none"`` before
+        # it accepts function tools on the chat endpoint. The OCI SDK validates
+        # the value client-side against its upper-case enum (``NONE``,
+        # ``MINIMAL``, ``LOW``, ``MEDIUM``, ``HIGH``), so accept the lower-case
+        # spelling the Responses transport uses and upper-case it here.
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort is not None:
+            request.reasoning_effort = str(reasoning_effort).upper()
+
         return request
 
     def convert_messages(self, messages: list[Message], model_id: str | None = None) -> list[Any]:

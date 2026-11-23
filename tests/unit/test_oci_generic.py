@@ -187,6 +187,26 @@ class TestGenericProvider:
 
         assert mock_request.stop == ["STOP"]
 
+    def test_build_request_with_reasoning_effort(self, provider):
+        """``reasoning_effort`` lands on the request when the caller set one."""
+        mock_request = MagicMock()
+        provider.oci_chat_request = MagicMock(return_value=mock_request)
+
+        provider.build_request([], model_id="openai.gpt-6-luna", reasoning_effort="none")
+
+        # The OCI SDK enum is upper-case; the lower-case spelling is accepted.
+        assert mock_request.reasoning_effort == "NONE"
+
+    def test_build_request_without_reasoning_effort_sends_nothing(self, provider):
+        """``None`` (the default) leaves the field alone so the server default applies."""
+        mock_request = MagicMock(spec=["tools", "stop"])
+        provider.oci_chat_request = MagicMock(return_value=mock_request)
+
+        provider.build_request([], model_id="openai.gpt-6-luna", reasoning_effort=None)
+        provider.build_request([], model_id="openai.gpt-4.1")
+
+        assert not hasattr(mock_request, "reasoning_effort")
+
     def test_convert_messages_system(self, provider):
         """Test converting system message."""
         provider.oci_text_content = MagicMock(return_value="text")
