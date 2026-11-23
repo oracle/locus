@@ -8,6 +8,12 @@ policy.
 
 ## [Unreleased]
 
+### Documentation
+
+- The decision page no longer presents the Decisions API on OCI Generative AI
+  as generally available: the endpoint is served to tenancies enabled for it,
+  while the OpenAI path works with any OpenAI API key (#602).
+
 ## [6.3.0] - 2026-11-23
 
 ### Added
