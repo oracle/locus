@@ -30,9 +30,10 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from xml.sax.saxutils import escape
 
+from locus.agent.completion import AUTOMATED_NOTE_KEY
 from locus.hooks.plugin import Plugin, hook
 from locus.skills.models import Skill
 from locus.tools.decorator import tool as tool_decorator
@@ -51,6 +52,10 @@ SkillRouter = Callable[
 
 #: The default text before the active skills' instructions.
 DEFAULT_ACTIVE_PREAMBLE = "Follow these skills for this conversation turn:\n\n"
+
+#: Where the skills are placed in the messages sent to the model (see
+#: ``SkillsPlugin(placement=)``).
+SkillPlacement = Literal["after_system", "after_prompt"]
 #: The default text before the catalog.
 DEFAULT_CATALOG_PREAMBLE = (
     "The following skills are available. To activate a skill, "
@@ -115,6 +120,7 @@ class SkillsPlugin(Plugin):
         catalog_preamble: str = DEFAULT_CATALOG_PREAMBLE,
         render_skill: Callable[[Skill], str] | None = None,
         skill_footer: bool = True,
+        placement: SkillPlacement = "after_system",
     ) -> None:
         """Initialize with skill sources.
 
@@ -159,6 +165,15 @@ class SkillsPlugin(Plugin):
                 with its ``Allowed tools`` / ``Compatibility`` / location
                 footer and resource listing. The model never needs them when
                 the host routes skills and enforces the tool list.
+            placement: Where the skills go in the messages sent to the model.
+                ``"after_system"`` (the default) puts them right after the
+                system prompt. ``"after_prompt"`` puts them right after the
+                run's latest user message, as the memory manager places its
+                block. A provider's prompt cache serves only a byte-identical
+                prefix: skills routed per turn, placed after the system prompt,
+                change the start of every request, so no turn reuses the
+                cached conversation. After the prompt, the next turn still
+                starts with this one's system prompt and history.
         """
         self._skills: dict[str, Skill] = {}
         self._max_resource_files = max_resource_files
@@ -169,6 +184,10 @@ class SkillsPlugin(Plugin):
         self._catalog_preamble = catalog_preamble
         self._render_skill = render_skill
         self._skill_footer = skill_footer
+        if placement not in ("after_system", "after_prompt"):
+            msg = f"placement must be 'after_system' or 'after_prompt', not {placement!r}"
+            raise ValueError(msg)
+        self._placement: SkillPlacement = placement
         # Per-run activation, keyed by run id; ``None`` is the bucket for calls
         # made outside any run (a tool called directly, an event built by hand).
         self._runs: dict[str | None, _RunSkills] = {}
@@ -330,11 +349,23 @@ class SkillsPlugin(Plugin):
         if not injected:
             return
 
-        # Insert after the first system message (if any)
         messages = list(event.messages)
-        insert_idx = 1 if messages and messages[0].role.value == "system" else 0
+        insert_idx = self._insert_at(messages)
         messages[insert_idx:insert_idx] = injected
         event.messages = messages
+
+    def _insert_at(self, messages: list[Any]) -> int:
+        """Where the skills go: after the first system message, or (with
+        ``placement="after_prompt"``) after the latest user message the user
+        wrote, never after a note the loop wrote in the user's role."""
+        if self._placement == "after_prompt":
+            for i in range(len(messages) - 1, -1, -1):
+                message = messages[i]
+                if getattr(message.role, "value", message.role) == "user" and not (
+                    message.metadata or {}
+                ).get(AUTOMATED_NOTE_KEY):
+                    return i + 1
+        return 1 if messages and messages[0].role.value == "system" else 0
 
     def allowed_tools(self, run_id: str | None = None) -> frozenset[str] | None:
         """The tools a run's active skills allow, or None when nothing limits them.
