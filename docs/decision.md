@@ -104,7 +104,7 @@ llama-server -m my-head-q4_k_m.gguf --port 8080          # a CPU is enough for 0
 A general instruction model works too, zero-shot, through the same rendered
 question. A head trained for the questions answers them more sharply.
 
-## A hosted endpoint: the Decisions API, on OCI or at OpenAI
+## A hosted endpoint: the Decisions API
 
 The OpenAI Decisions API (`POST /decisions`) answers the same kind of question
 as a hosted endpoint: typed questions about one shared input, each with a
@@ -120,7 +120,10 @@ router do not change when a team moves from a local head to the hosted model.
 | `Score`  | `score`     | `probabilities[].probability`, matched by `label` (2 to 10 levels) |
 
 OCI Generative AI serves it on `/openai/v1/decisions` under IAM signing, with
-the compartment in `opc-compartment-id`, as the model `openai.gpt-6-luna`:
+the compartment in `opc-compartment-id`, as the model `openai.gpt-6-luna`. The
+endpoint is available to tenancies that have been enabled for it, so check with
+your OCI account team before relying on it. The same code runs against OpenAI
+with any OpenAI API key (below). On OCI:
 
 ```python
 from locus.decision import Choice, DecisionsAPIDecider, Score, YesNo
