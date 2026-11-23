@@ -10,6 +10,14 @@ policy.
 
 ### Added
 
+- **Skills placed where a prompt cache can reuse the conversation.**
+  `SkillsPlugin(placement="after_prompt")` sends the active skills (and the
+  catalog) right after the run's latest user message instead of right after
+  the system prompt, as the memory manager places its block. Skills routed per
+  run otherwise change the start of every request, so a provider's prefix
+  cache serves none of the conversation. The default, `"after_system"`, is
+  unchanged.
+
 - **A command-line reference.** `docs/how-to/command-line.md` documents the
   `locus` command; its table of subcommands and actions is rendered at docs
   build time from `locus.cli.build_parser()` through `{{ locus_cli_reference }}`,

@@ -40,6 +40,14 @@ skills' instructions as a system message before every model call, and
 either path the catalog and the `skills` tool are off unless you set
 `catalog=True`.
 
+A routed skill changes from run to run. Placed right after the system
+prompt, it changes the start of every request, and a provider's prompt
+cache, which serves only a byte-identical prefix, then reuses nothing of
+the conversation. `placement="after_prompt"` puts the skills right after
+the run's latest user message instead, where the memory manager puts its
+block: the next run's request still starts with this one's system prompt
+and history.
+
 A skill defined in code and attached to an agent:
 
 {{ locus_model_tabs }}

@@ -211,3 +211,68 @@ class TestPaths:
     def test_paths_are_shown_by_default(self, tmp_path: Path) -> None:
         plugin = SkillsPlugin([self._on_disk(tmp_path)])
         assert "secret-layout" in plugin._generate_catalog_xml()
+
+
+class TestPlacement:
+    """``placement="after_prompt"``: a provider's prompt cache serves only a
+    byte-identical prefix, so skills routed per run must not sit between the
+    system prompt and the history."""
+
+    @staticmethod
+    def _roles(messages: list[Message]) -> list[str]:
+        return [str(getattr(m.role, "value", m.role)) for m in messages]
+
+    async def test_after_prompt_puts_the_skills_after_the_latest_user_message(self) -> None:
+        def handler(messages: list[Message], tools: list[dict[str, Any]]) -> Any:
+            if any(getattr(m.role, "value", m.role) == "tool" for m in messages):
+                return text("Flexible is 840 EUR.")
+            return tool_call("get_offers", hotel="Aliee")
+
+        model = FunctionModel(handler)
+        plugin = SkillsPlugin([PRICING], active=["pricing"], placement="after_prompt")
+        agent = Agent(model=model, tools=[get_offers], plugins=[plugin], system_prompt="Base.")
+        await agent.arun("rates?")
+
+        first, second = model.received_messages
+        assert self._roles(first) == ["system", "user", "system"]
+        assert "Quote rates line by line" in (first[2].content or "")
+        # The tool call and its result come after the skills: the second call
+        # starts with the first call's whole request, a prefix the cache serves.
+        assert self._roles(second)[:3] == ["system", "user", "system"]
+        assert [str(m.content) for m in second[:3]] == [str(m.content) for m in first]
+
+    async def test_the_next_run_starts_with_the_previous_runs_history(self, tmp_path: Path) -> None:
+        def route(text_: str, _run: Any) -> list[str]:
+            return ["pricing"] if "rates" in text_ else ["booking"]
+
+        model = FunctionModel(lambda _m, _t: text("Noted."))
+        agent = Agent(
+            model=model,
+            plugins=[SkillsPlugin([PRICING, BOOKING], router=route, placement="after_prompt")],
+            system_prompt="Base.",
+            checkpointer=FileCheckpointer(tmp_path),
+        )
+        await agent.arun("rates?", thread_id="t1")
+        await agent.arun("book it", thread_id="t1")
+
+        first, second = model.received_messages
+        # Different skills each run, yet the second request opens with the
+        # first one's system prompt, prompt and reply.
+        assert [m.content for m in second[:2]] == [m.content for m in first[:2]]
+        assert self._roles(second) == ["system", "user", "assistant", "user", "system"]
+        assert "Call prepare_booking." in (second[-1].content or "")
+        assert all("Quote rates" not in (m.content or "") for m in second)
+
+    async def test_after_system_stays_the_default(self) -> None:
+        model = FunctionModel(lambda _m, _t: text("Hello."))
+        agent = Agent(
+            model=model,
+            plugins=[SkillsPlugin([PRICING], active=["pricing"])],
+            system_prompt="Base.",
+        )
+        await agent.arun("hi")
+        assert self._roles(model.received_messages[0]) == ["system", "system", "user"]
+
+    def test_an_unknown_placement_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="placement"):
+            SkillsPlugin([PRICING], placement="first")  # type: ignore[arg-type]
