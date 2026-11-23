@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.4.0] - 2026-11-23
+
 ### Added
 
 - **`reasoning_effort` on the OCI chat transports.** `OCIModel(reasoning_effort=...)`
