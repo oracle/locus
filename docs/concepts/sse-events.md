@@ -153,6 +153,9 @@ a hold for human approval, and `allow: true` alone is an allow.
 | Event | Payload |
 |---|---|
 | `rag.query.started` | `query_preview`, `limit`, `store_type`, `threshold` |
+| `rag.embedding.generated` | `embedder_type`, `count`, `dimension`, `purpose` (`query` \| `documents`) |
+| `rag.store.search` | `store_type`, `limit`, `hit_count`, `hybrid` (`True` only when the hybrid path ran) |
+| `rag.store.upsert` | `store_type`, `doc_id`, `chunk_count` |
 | `rag.query.completed` | `hit_count`, `top_score`, `duration_ms`, `store_type`, `reranker_type`, `success`, `error` (when `success` is false; `hit_count` is 0) |
 
 ### `memory.*` — checkpointing, conversation management, long-term memory
@@ -268,12 +271,10 @@ without storing either.
 
 ## Declared but not emitted
 
-Five constants in `src/locus/observability/emit.py` have no emission site
+Two constants in `src/locus/observability/emit.py` have no emission site
 today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
-(`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
-(`multiagent.graph.node.routed`), `EV_RAG_EMBEDDING_GENERATED`
-(`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`)
-and `EV_RAG_STORE_UPSERT` (`rag.store.upsert`). The unit test
+(`a2a.task.processing`) and `EV_GRAPH_NODE_ROUTED`
+(`multiagent.graph.node.routed`). The unit test
 `tests/unit/test_emit_constants_have_sites.py` carries the same list and
 fails when a constant gains or loses an emission site without this page
 following.
@@ -333,7 +334,7 @@ and the span boundary come from the same moment of the loop.
 | `multiagent.graph.node.*` | no span; a node that runs an agent produces that agent's `invoke_agent` |
 | `composition.*` | no span; each stage's agent run is an `invoke_agent` |
 | `router.*` | no span; the compiled runnable's agents produce `invoke_agent` spans |
-| `rag.query.started` / `rag.query.completed` | inside `execute_tool` when retrieval is a tool, else inside `locus.iteration` |
+| `rag.query.*`, `rag.embedding.generated`, `rag.store.search` | inside `execute_tool` when retrieval is a tool, else inside `locus.iteration` |
 | `memory.checkpoint.saved` | inside `locus.iteration` (`every_n_iterations`), or at the end of `invoke_agent` (`final`) |
 | `memory.checkpoint.loaded` | before `invoke_agent` of the resumed run |
 | `memory.conversation.pruned`, `memory.compactor.*`, `memory.manager.injected` | inside `locus.iteration`, before the `chat` span |

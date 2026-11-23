@@ -234,6 +234,29 @@ class RAGRetriever(BaseModel):
 
         return chunks
 
+    async def _emit_embedding(self, results: list[Any], purpose: str) -> None:
+        """Emit ``rag.embedding.generated`` for one embedder call (scalars only)."""
+        from locus.observability.emit import EV_RAG_EMBEDDING_GENERATED, emit  # noqa: PLC0415
+
+        await emit(
+            EV_RAG_EMBEDDING_GENERATED,
+            embedder_type=type(self.embedder).__name__,
+            count=len(results),
+            dimension=len(results[0].embedding) if results else 0,
+            purpose=purpose,
+        )
+
+    async def _emit_upsert(self, doc_id: str, chunk_count: int) -> None:
+        """Emit ``rag.store.upsert`` after documents were written to the store."""
+        from locus.observability.emit import EV_RAG_STORE_UPSERT, emit  # noqa: PLC0415
+
+        await emit(
+            EV_RAG_STORE_UPSERT,
+            store_type=type(self.store).__name__,
+            doc_id=doc_id,
+            chunk_count=chunk_count,
+        )
+
     async def add_document(
         self,
         content: str,
@@ -263,6 +286,7 @@ class RAGRetriever(BaseModel):
 
         # Embed all chunks
         embeddings = await self.embedder.embed_documents(chunks)
+        await self._emit_embedding(embeddings, "documents")
 
         # Create documents
         documents = []
@@ -285,6 +309,7 @@ class RAGRetriever(BaseModel):
 
         # Store all documents
         added: list[str] = await self.store.add_batch(documents)
+        await self._emit_upsert(base_id, len(documents))
         return added
 
     async def add_documents(
@@ -366,6 +391,7 @@ class RAGRetriever(BaseModel):
 
         # Embed all chunks
         embeddings = await self.embedder.embed_documents(chunks)
+        await self._emit_embedding(embeddings, "documents")
 
         # Create documents
         documents = []
@@ -389,6 +415,7 @@ class RAGRetriever(BaseModel):
             documents.append(doc)
 
         added: list[str] = await self.store.add_batch(documents)
+        await self._emit_upsert(base_id, len(documents))
         return added
 
     async def add_image(
@@ -417,6 +444,7 @@ class RAGRetriever(BaseModel):
 
         # Embed the extracted text
         embedding_result = await self.embedder.embed(result.text)
+        await self._emit_embedding([embedding_result], "documents")
 
         doc = Document(
             id=doc_id or uuid4().hex,
@@ -428,6 +456,7 @@ class RAGRetriever(BaseModel):
         )
 
         doc_added: str = await self.store.add(doc)
+        await self._emit_upsert(doc.id, 1)
         return doc_added
 
     async def add_pdf(
@@ -485,6 +514,7 @@ class RAGRetriever(BaseModel):
 
         # Embed the transcription
         embedding_result = await self.embedder.embed(result.text)
+        await self._emit_embedding([embedding_result], "documents")
 
         doc = Document(
             id=doc_id or uuid4().hex,
@@ -496,6 +526,7 @@ class RAGRetriever(BaseModel):
         )
 
         doc_added: str = await self.store.add(doc)
+        await self._emit_upsert(doc.id, 1)
         return doc_added
 
     async def retrieve(
@@ -540,6 +571,7 @@ class RAGRetriever(BaseModel):
         from locus.observability.emit import (  # noqa: PLC0415
             EV_RAG_QUERY_COMPLETED,
             EV_RAG_QUERY_STARTED,
+            EV_RAG_STORE_SEARCH,
             emit,
         )
 
@@ -555,6 +587,7 @@ class RAGRetriever(BaseModel):
         try:
             # Embed the query
             query_result = await self.embedder.embed_query(query)
+            await self._emit_embedding([query_result], "query")
 
             # If a reranker is wired in, over-fetch from the vector store
             # (cheap embedding search), then have the reranker rescore the
@@ -567,7 +600,8 @@ class RAGRetriever(BaseModel):
             # Search the store — blended when asked for and the store can do it,
             # otherwise by vector alone (logged once so the fallback is visible).
             use_hybrid = self.hybrid if hybrid is None else hybrid
-            if use_hybrid and self.hybrid_supported:
+            ran_hybrid = bool(use_hybrid and self.hybrid_supported)
+            if ran_hybrid:
                 results = await self.store.hybrid_search(
                     query,
                     query_result.embedding,
@@ -591,6 +625,13 @@ class RAGRetriever(BaseModel):
                     threshold=threshold,
                     metadata_filter=metadata_filter,
                 )
+            await emit(
+                EV_RAG_STORE_SEARCH,
+                store_type=type(self.store).__name__,
+                limit=store_limit,
+                hit_count=len(results),
+                hybrid=ran_hybrid,
+            )
 
             if self.reranker is not None and results:
                 results = await self.reranker.rerank(query, results)
