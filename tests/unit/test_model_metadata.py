@@ -156,6 +156,53 @@ class TestRegisterMetadata:
         assert md.family == "v2"
         assert md.context_length == 2_000
 
+    def test_register_under_a_provider_prefix_is_found_by_every_spelling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The documented recipe: price an OCI-served model under its full id.
+        # Lookup strips ``oci:`` before it searches, so the entry has to be
+        # stored under the stripped key or it is never found — and it has to
+        # win over the built-in record of the model the id serves.
+        from locus.models import metadata as module
+
+        monkeypatch.setattr(module, "_registry", dict(module._registry))
+        built_in = metadata_for("oci:openai.gpt-5.5")
+        assert built_in is not None
+        assert built_in.model_id == "gpt-5.5"
+        register_metadata(
+            ModelMetadata(
+                model_id="oci:openai.gpt-5.5",
+                family="openai",
+                context_length=400_000,
+                max_output_tokens=128_000,
+                input_price_per_mtok="3.00",
+                output_price_per_mtok="12.00",
+            )
+        )
+        for spelling in ("oci:openai.gpt-5.5", "openai.gpt-5.5", " oci:openai.gpt-5.5 "):
+            md = metadata_for(spelling)
+            assert md is not None, spelling
+            assert md.model_id == "openai.gpt-5.5"
+            assert md.input_price_per_mtok == Decimal("3.00")
+        # The vendor's own record is untouched for callers that name it directly.
+        plain = metadata_for("gpt-5.5")
+        assert plain is not None
+        assert plain.input_price_per_mtok == Decimal("1.25")
+
+    def test_register_keeps_an_unknown_prefix(self) -> None:
+        register_metadata(
+            ModelMetadata(
+                model_id="acme:house-model",
+                family="acme",
+                context_length=8_000,
+                max_output_tokens=1_000,
+            )
+        )
+        md = metadata_for("acme:house-model")
+        assert md is not None
+        assert md.model_id == "acme:house-model"
+        assert metadata_for("house-model") is None
+
 
 # ---------------------------------------------------------------------------
 # known_models snapshot.
