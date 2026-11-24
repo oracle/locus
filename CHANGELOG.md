@@ -16,6 +16,16 @@ policy.
   nothing to show while the findings sat on `raw.outputs`. It now raises
   `ProtocolExecutionError`, as a pipeline that produced no finding already
   did, and the dispatcher publishes it as `router.runnable.failed`.
+- **The catalogue's Meta and Cohere output caps are what the service enforces.**
+  The OCI model pages say on-demand serving stops a Meta or Cohere reply at
+  4,000 tokens, and the catalogue carried that figure. Measured against the
+  service, Llama 3.3 70B produced 6,000 tokens and Llama 4 Scout 8,000 when
+  asked, and the OpenAI-compatible endpoint names each Meta model's model
+  length as its limit (131,072, 524,288 and 196,608 for Llama 3.3 70B, Llama 4
+  Maverick and Scout), while the Cohere Command A models refuse `maxTokens`
+  above 4,096. Those entries now carry the measured figures, so an agent on
+  them no longer reserves a 4,000-token reply it does not need to. Models not
+  served on-demand in the regions measured keep the documented figures.
 
 ### Documentation
 

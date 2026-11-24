@@ -486,11 +486,11 @@ class TestOCIModelIds:
             ("oci:openai.gpt-5.1", "gpt-5.1", 400_000),
             ("oci:openai.gpt-4o", "gpt-4o", 128_000),
             ("oci:openai.o3", "o3", 200_000),
-            ("oci:meta.llama-3.3-70b-instruct", "llama-3.3-70b-instruct", 128_000),
+            ("oci:meta.llama-3.3-70b-instruct", "llama-3.3-70b-instruct", 131_072),
             (
                 "oci:meta.llama-4-maverick-17b-128e-instruct-fp8",
                 "llama-4-maverick-17b-128e-instruct-fp8",
-                512_000,
+                524_288,
             ),
             ("oci:cohere.command-a-03-2025", "command-a-03-2025", 256_000),
             ("oci:cohere.command-r-plus-08-2024", "command-r-plus-08-2024", 128_000),
@@ -499,7 +499,7 @@ class TestOCIModelIds:
             ("oci:cohere.command-a-reasoning", "command-a-reasoning", 256_000),
             ("oci:cohere.command-a-vision", "command-a-vision", 128_000),
             ("oci:meta.llama-3.1-405b-instruct", "llama-3.1-405b-instruct", 128_000),
-            ("oci:meta.llama-4-scout-17b-16e-instruct", "llama-4-scout-17b-16e-instruct", 192_000),
+            ("oci:meta.llama-4-scout-17b-16e-instruct", "llama-4-scout-17b-16e-instruct", 196_608),
             ("oci:xai.grok-4.7", "grok-4.7", 500_000),
             ("xai.grok-4.6", "grok-4.6", 500_000),
             ("oci:xai.grok-4.3", "grok-4.3", 1_000_000),
@@ -535,3 +535,22 @@ class TestOCIModelIds:
         assert md.family == "meta"
         assert md.input_price_per_mtok is None
         assert md.output_price_per_mtok is None
+
+    @pytest.mark.parametrize(
+        ("model_id", "cap"),
+        [
+            ("oci:meta.llama-3.3-70b-instruct", 131_072),
+            ("oci:meta.llama-4-maverick-17b-128e-instruct-fp8", 524_288),
+            ("oci:meta.llama-4-scout-17b-16e-instruct", 196_608),
+            ("oci:cohere.command-a-03-2025", 4_096),
+            ("oci:cohere.command-a-vision", 4_096),
+        ],
+    )
+    def test_measured_output_caps(self, model_id: str, cap: int) -> None:
+        # The OCI pages say on-demand Meta and Cohere replies stop at 4,000
+        # tokens; the service produced 6,000 and 8,000 for the Meta models and
+        # names their model length as the limit, and refuses Cohere maxTokens
+        # above 4,096. The catalogue carries what the service enforces.
+        md = metadata_for(model_id)
+        assert md is not None
+        assert md.max_output_tokens == cap

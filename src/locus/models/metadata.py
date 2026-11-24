@@ -715,29 +715,37 @@ _seed(
 # other entry covers. Windows are the ones the OCI Generative AI documentation
 # states per model (read 2026-11-16); where another route lists a larger one
 # (xAI's own API for Grok 4) the OCI figure is the smaller and safe for both.
-# Output caps are the figures the same pages give: on-demand serving caps a
-# Meta or Cohere reply at 4,000 tokens (a dedicated cluster does not), Gemini
-# defaults to 65,536 and Grok 4's playground cap is 16,000. No prices: OCI
-# bills at its own rates, which a budget registers itself.
+# Output caps: the OCI pages say on-demand serving caps a Meta or Cohere reply
+# at 4,000 tokens, but the service does not hold the Meta models to that on
+# the OpenAI-compatible endpoint. Measured 2026-11-24: Llama 3.3 70B produced
+# 6,000 tokens when asked and names 131,072 as its model length, Llama 4
+# Maverick names 524,288 and Scout 196,608 ("supports at most N completion
+# tokens"), so those three carry the service's model length as window and cap;
+# the Cohere Command A models refuse ``maxTokens`` above 4,096, which is their
+# cap. Unmeasured models keep the documented figures. Gemini defaults to 65,536
+# and Grok 4's playground cap is 16,000. No prices: OCI bills at its own rates,
+# which a budget registers itself.
 for _slug, _family, _window, _output in (
-    ("llama-3.3-70b-instruct", "meta", 128_000, 4_000),
-    ("llama-4-maverick-17b-128e-instruct-fp8", "meta", 512_000, 4_000),
-    ("command-a-03-2025", "cohere", 256_000, 4_000),
+    ("llama-3.3-70b-instruct", "meta", 131_072, 131_072),
+    ("llama-4-maverick-17b-128e-instruct-fp8", "meta", 524_288, 524_288),
+    ("command-a-03-2025", "cohere", 256_000, 4_096),
     ("command-r-plus-08-2024", "cohere", 128_000, 4_000),
     ("gemini-2.5-pro", "google", 1_048_576, 65_536),
     ("gemini-2.5-flash", "google", 1_048_576, 65_536),
     ("grok-4", "xai", 128_000, 16_000),
-    # Added 2026-11-24 from the OCI model pages of that day. Llama 4 Scout's
-    # cap is the one the service itself named when asked for more
-    # ("supports at most 196608 completion tokens"); Command A Vision's page
-    # gives no cap, so it carries the on-demand Cohere figure. Grok 4.3 and
-    # 4.20 pages give a 131,000 playground cap; the Grok 4.7 and 4.6 pages
-    # give none and the service accepted any value asked, so they carry their
-    # siblings' figure. The 4.20 variants are the ids OCI lists for one model.
+    # Added 2026-11-24 from the OCI model pages of that day. Llama 4 Scout
+    # carries the model length the service names (and it produced 8,000
+    # tokens when asked); Command A Vision refuses maxTokens above 4,096 like
+    # Command A. Llama 3.1 405B and Command A Reasoning were not served
+    # on-demand in the regions measured and keep the documented figures. Grok
+    # 4.3 and 4.20 pages give a 131,000 playground cap; the Grok 4.7 and 4.6
+    # pages give none and the service accepted any value asked, so they carry
+    # their siblings' figure. The 4.20 variants are the ids OCI lists for one
+    # model.
     ("command-a-reasoning", "cohere", 256_000, 4_000),
-    ("command-a-vision", "cohere", 128_000, 4_000),
+    ("command-a-vision", "cohere", 128_000, 4_096),
     ("llama-3.1-405b-instruct", "meta", 128_000, 4_000),
-    ("llama-4-scout-17b-16e-instruct", "meta", 192_000, 196_608),
+    ("llama-4-scout-17b-16e-instruct", "meta", 196_608, 196_608),
     ("gemini-2.5-flash-lite", "google", 1_048_576, 65_536),
     ("grok-4.7", "xai", 500_000, 131_000),
     ("grok-4.6", "xai", 500_000, 131_000),
