@@ -83,9 +83,10 @@ deliberately simple enough to reproduce against anything else.
 ## Router selection benchmark
 
 The one measurement here that calls a model. `router/cases.json` is the
-routing corpus as `EvalCase` objects: 46 labelled prompts tagged with the
-protocol each should reach (`shape:<id>`), two of them `trap` cases whose
-verb points at an expensive shape while the work is one step, and 18
+routing corpus as `EvalCase` objects: 180 labelled prompts tagged with the
+protocol each should reach (`shape:<id>`) and the difficulty their author
+intends (`difficulty:<level>`), 26 of them `trap` cases whose verb points
+at an expensive shape while the work is one step, and 18
 adversarial prompts (`injection`, `ambiguous`) scored on whether the answer
 stays inside the registered set. `locus.router.benchmark` adapts selection
 to `EvalRunner`'s contract, so the typed router, the typed router with a

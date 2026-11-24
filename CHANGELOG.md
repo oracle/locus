@@ -8,6 +8,22 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **The router benchmark corpus is 180 labelled prompts with 26 traps.**
+  `benchmarks/router/cases.json` grows from 46 labelled prompts and two
+  traps to the size the router's benchmark target names, 198 cases with the
+  eighteen adversarial ones: thirteen or fourteen prompts for each of the
+  thirteen goals, and traps for the nine goals whose canonical shape is not
+  the low-cost one. Every labelled case now states the frame its author
+  intends (`expected_complexity` and `expected_risk` beside `expected_goal`
+  in its metadata) and carries a `difficulty:low`, `difficulty:medium` or
+  `difficulty:high` tag; the label is the protocol the compiler selects for
+  that frame, which a unit test checks. `load_router_corpus` requires the
+  difficulty tag on a labelled case and low difficulty on a trap, and
+  `tag_table` prints a row per difficulty. A report on the earlier corpus
+  has another fingerprint, so a diff across the two is refused (#342).
+
 ## [6.5.1] - 2026-11-24
 
 ### Changed
