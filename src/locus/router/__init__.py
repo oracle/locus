@@ -96,6 +96,7 @@ from locus.router.runnable import (
     DebateRunnable,
     OrchestratorRunnable,
     PipelineRunnable,
+    ProtocolExecutionError,
     Runnable,
     RunnableResult,
 )
@@ -123,6 +124,7 @@ __all__ = [
     "PickedProtocol",
     "PickerError",
     "PipelineRunnable",
+    "ProtocolExecutionError",
     "PolicyDeniedError",
     "PolicyGate",
     "PolicyVerdict",

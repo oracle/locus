@@ -13,6 +13,7 @@ behavior, and the ``stream()`` SSE iteration + non-stream fallback.
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -410,3 +411,77 @@ class TestStream:
         assert out[-1].done is True
         # parse_stream_chunk only called for the valid JSON event.
         assert provider.parse_stream_chunk.call_count == 1
+
+
+class TestToolsRefusedUnderReasoning:
+    """The SDK transport answers the endpoint's refusal of tools under reasoning with 'none'."""
+
+    _MESSAGE = (
+        "Function tools with reasoning_effort are not supported for gpt-6-luna in "
+        "/v1/chat/completions. To use function tools, use /v1/responses or set "
+        "reasoning_effort to 'none'"
+    )
+    _TOOLS = [{"type": "function", "function": {"name": "stock"}}]
+
+    @staticmethod
+    def _refusal(message: str):
+        from oci.exceptions import ServiceError
+
+        return ServiceError(400, "400", {}, message)
+
+    @pytest.mark.asyncio
+    async def test_refusal_is_retried_with_none_and_logged_once(self, caplog) -> None:
+        m = OCIModel(model_id="openai.gpt-6-luna", reasoning_effort="low")
+        client, provider = _patch_client_and_provider(m, _make_oci_response())
+        provider.convert_tools.return_value = [SimpleNamespace(name="stock")]
+        client.chat = MagicMock(side_effect=[self._refusal(self._MESSAGE), _make_oci_response()])
+        with caplog.at_level(logging.WARNING, logger="locus.models.providers.oci"):
+            result = await m.complete([Message.user("hi")], tools=self._TOOLS)
+        assert result.message.content == "hello"
+        efforts = [c.kwargs["reasoning_effort"] for c in provider.build_request.call_args_list]
+        assert efforts == ["low", "none"]
+        notices = [r for r in caplog.records if "reasoning_effort='none'" in r.getMessage()]
+        assert len(notices) == 1
+        assert "OCIModel" in notices[0].getMessage()
+        # The instance now sends "none" with tools at once, silently.
+        caplog.clear()
+        client.chat = MagicMock(return_value=_make_oci_response())
+        await m.complete([Message.user("again")], tools=self._TOOLS)
+        assert provider.build_request.call_args.kwargs["reasoning_effort"] == "none"
+        assert client.chat.call_count == 1
+        assert not [r for r in caplog.records if "reasoning_effort" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_other_400_is_raised(self) -> None:
+        from oci.exceptions import ServiceError
+
+        m = OCIModel(model_id="openai.gpt-6-luna")
+        client, provider = _patch_client_and_provider(m, _make_oci_response())
+        provider.convert_tools.return_value = [SimpleNamespace(name="stock")]
+        client.chat = MagicMock(side_effect=self._refusal("Unsupported OpenAI operation"))
+        with pytest.raises(ServiceError):
+            await m.complete([Message.user("hi")], tools=self._TOOLS)
+        assert provider.build_request.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_without_tools_the_refusal_is_raised(self) -> None:
+        from oci.exceptions import ServiceError
+
+        m = OCIModel(model_id="openai.gpt-6-luna")
+        client, provider = _patch_client_and_provider(m, _make_oci_response())
+        client.chat = MagicMock(side_effect=self._refusal(self._MESSAGE))
+        with pytest.raises(ServiceError):
+            await m.complete([Message.user("hi")])
+        assert provider.build_request.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_already_none_is_not_retried(self) -> None:
+        from oci.exceptions import ServiceError
+
+        m = OCIModel(model_id="openai.gpt-6-luna", reasoning_effort="none")
+        client, provider = _patch_client_and_provider(m, _make_oci_response())
+        provider.convert_tools.return_value = [SimpleNamespace(name="stock")]
+        client.chat = MagicMock(side_effect=self._refusal(self._MESSAGE))
+        with pytest.raises(ServiceError):
+            await m.complete([Message.user("hi")], tools=self._TOOLS)
+        assert provider.build_request.call_count == 1

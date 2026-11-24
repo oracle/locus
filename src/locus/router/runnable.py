@@ -94,6 +94,24 @@ class AgentRunnable(BaseModel):
         )
 
 
+class ProtocolExecutionError(RuntimeError):
+    """A compiled protocol ran and produced nothing, because every agent in it failed.
+
+    Raised by :class:`PipelineRunnable` in place of a :class:`RunnableResult`
+    with empty ``text``: a fan-out whose every specialist raised (for instance
+    the model endpoint refusing the request) used to come back as a successful
+    dispatch with nothing to show, and the per-agent errors stayed inside
+    ``raw.error``. ``detail`` carries those errors.
+    """
+
+    def __init__(self, protocol_id: str, detail: str | None) -> None:
+        self.protocol_id = protocol_id
+        self.detail = detail
+        super().__init__(
+            f"protocol {protocol_id!r} produced no output: {detail or 'every agent failed'}"
+        )
+
+
 class PipelineRunnable(BaseModel):
     """Adapter from any composition primitive to :class:`Runnable`.
 
@@ -110,8 +128,13 @@ class PipelineRunnable(BaseModel):
 
     async def execute(self, task: str) -> RunnableResult:
         result = await self.pipeline.run(task)
+        text = result.final_output or ""
+        if not result.success and not text.strip():
+            # Partial failures keep the text the surviving agents produced;
+            # a pipeline that produced nothing at all is a failed dispatch.
+            raise ProtocolExecutionError(self.protocol_id, result.error)
         return RunnableResult(
-            text=result.final_output or "",
+            text=text,
             parsed=None,
             raw=result,
             protocol_id=self.protocol_id,

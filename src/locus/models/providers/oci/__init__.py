@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from functools import partial
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -26,6 +27,12 @@ from pydantic import BaseModel, Field
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
 from locus.models.base import ModelConfig, ModelResponse
+from locus.models.providers.oci._reasoning import (
+    NO_REASONING,
+    is_no_reasoning,
+    refuses_tools_under_reasoning,
+    warn_reasoning_disabled,
+)
 from locus.models.providers.oci.base import OCIModelProvider
 from locus.models.providers.oci.client import OCIAuthType, OCIClient, OCIClientConfig
 from locus.models.providers.oci.models import CohereProvider, GenericProvider
@@ -267,34 +274,42 @@ class OCIModel(BaseModel):
         converted_tools = self.provider.convert_tools(effective_tools)
 
         # Build request kwargs - remove duplicates
-        request_kwargs = {
+        reasoning_effort = kwargs.pop("reasoning_effort", self.config.reasoning_effort)
+        if converted_tools and getattr(self, "_tools_without_reasoning", False):
+            # The endpoint refused tools under reasoning earlier on this instance.
+            reasoning_effort = NO_REASONING
+        base_kwargs = {
             "max_tokens": kwargs.pop("max_tokens", self.config.max_tokens),
             "temperature": kwargs.pop("temperature", self.config.temperature),
-            "reasoning_effort": kwargs.pop("reasoning_effort", self.config.reasoning_effort),
             **kwargs,
         }
 
-        # Build the request. Pass model_id so the provider can pick the right
-        # token-limit field (OpenAI wants max_completion_tokens, Meta wants
-        # max_tokens, others accept either).
-        request_kwargs["model_id"] = self.config.model_id
-        if isinstance(converted_messages, dict):
-            # Cohere returns a dict with special keys
-            request_kwargs = {**converted_messages, **request_kwargs}
-            chat_request = self.provider.build_request([], converted_tools, **request_kwargs)
-        else:
-            chat_request = self.provider.build_request(
-                converted_messages,
-                converted_tools,
-                **request_kwargs,
+        def _chat_details(effort: str | None) -> Any:
+            # Build the request. Pass model_id so the provider can pick the right
+            # token-limit field (OpenAI wants max_completion_tokens, Meta wants
+            # max_tokens, others accept either).
+            request_kwargs = {
+                **base_kwargs,
+                "reasoning_effort": effort,
+                "model_id": self.config.model_id,
+            }
+            if isinstance(converted_messages, dict):
+                # Cohere returns a dict with special keys
+                request_kwargs = {**converted_messages, **request_kwargs}
+                chat_request = self.provider.build_request([], converted_tools, **request_kwargs)
+            else:
+                chat_request = self.provider.build_request(
+                    converted_messages,
+                    converted_tools,
+                    **request_kwargs,
+                )
+            return models.ChatDetails(
+                compartment_id=self.client.compartment_id,
+                serving_mode=self.client.get_serving_mode(self.config.model_id),
+                chat_request=chat_request,
             )
 
-        # Create chat details
-        chat_details = models.ChatDetails(
-            compartment_id=self.client.compartment_id,
-            serving_mode=self.client.get_serving_mode(self.config.model_id),
-            chat_request=chat_request,
-        )
+        chat_details = _chat_details(reasoning_effort)
 
         # Execute request with retry for empty responses.
         # OCI GenAI sometimes returns empty content, especially under
@@ -303,10 +318,31 @@ class OCIModel(BaseModel):
         max_retries = 3
 
         for attempt in range(max_retries):
-            response = await loop.run_in_executor(
-                None,
-                lambda: self.client.chat(chat_details),
-            )
+            try:
+                response = await loop.run_in_executor(
+                    None,
+                    partial(self.client.chat, chat_details),
+                )
+            except Exception as exc:
+                # The chat endpoint refuses function tools for the gpt-5.6 and
+                # gpt-6 families unless reasoning_effort is "none": do what the
+                # message asks, once, and keep doing it for this instance.
+                refused = (
+                    bool(converted_tools)
+                    and not is_no_reasoning(reasoning_effort)
+                    and getattr(exc, "status", None) == 400
+                    and refuses_tools_under_reasoning(getattr(exc, "message", None) or str(exc))
+                )
+                if not refused:
+                    raise
+                object.__setattr__(self, "_tools_without_reasoning", True)
+                warn_reasoning_disabled(self.config.model_id, "OCIModel")
+                reasoning_effort = NO_REASONING
+                chat_details = _chat_details(reasoning_effort)
+                response = await loop.run_in_executor(
+                    None,
+                    partial(self.client.chat, chat_details),
+                )
 
             # Parse response
             content, tool_calls, stop_reason = self.provider.parse_response(response)

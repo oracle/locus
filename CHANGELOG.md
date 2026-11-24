@@ -34,6 +34,25 @@ policy.
   usage (`prompt_tokens`, `completion_tokens`, `total_tokens`,
   `scope="run"`) when the provider metered the run; the per-call shape
   carries `scope="call"`. An unmetered run still publishes no counts.
+- **The OCI chat transports answer the endpoint's refusal of function tools
+  under reasoning.** The chat endpoint rejects a request that carries function
+  tools for a gpt-5.6 or gpt-6 model unless `reasoning_effort` is `none`
+  (`400 Function tools with reasoning_effort are not supported … set
+  reasoning_effort to 'none'`). `OCIModel` and `OCIChatCompletionsModel` now do
+  what the message asks: the request is sent again with `none`, the instance
+  keeps sending `none` with tools, and a warning is logged once. An agent
+  on one of those models through the `oci:` prefix completes its tool calls
+  instead of failing on its first turn. Pass `reasoning_effort="none"` at
+  construction to skip the first attempt, or use `OCIResponsesModel` to keep
+  reasoning together with tools.
+- **A fan-out whose every specialist failed is a failed dispatch.**
+  `PipelineRunnable` returned a `RunnableResult` with empty `text` when every
+  agent of a `specialist_fanout` (or of any pipeline) raised, so
+  `Router.dispatch` reported a successful run with nothing to show and the
+  per-agent errors stayed inside `raw.error`. It now raises
+  `ProtocolExecutionError` carrying those errors, which the dispatcher
+  publishes as `router.runnable.failed`; a partial failure still returns the
+  text the surviving agents produced.
 
 ## [6.5.2] - 2026-11-24
 
