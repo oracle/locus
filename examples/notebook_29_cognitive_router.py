@@ -69,12 +69,12 @@ from locus.tools.registry import create_registry
 RUNTIME_SHAPES: dict[str, str] = {
     "direct_response": "Agent (single call)",
     "plan_execute_validate": "SequentialPipeline of 3 Agents (planner → executor → validator)",
-    "specialist_fanout": "ParallelPipeline of N tool-bound Agents",
+    "specialist_fanout": "ParallelPipeline of N tool-bound Agents + synthesis Agent",
     "debate": "ParallelPipeline of 2 debaters + judge Agent",
     "codegen_test_validate": "LoopAgent (PASS/FAIL stop)",
     "approval_gated_execution": "Agent wrapped in approval interrupt",
     "a2a_delegate": "A2AClient.invoke against remote endpoint",
-    "handoff_chain": "SequentialPipeline of one-tool Agents",
+    "handoff_chain": "SequentialPipeline of one-tool Agents + synthesis Agent",
 }
 
 

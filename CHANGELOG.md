@@ -34,6 +34,16 @@ policy.
   registration too, so the entry is found under every spelling of the id
   and wins over the built-in record; an unknown prefix stays part of the
   slug.
+- **`specialist_fanout` and `handoff_chain` answer the request.** Each agent
+  of these two router protocols has one tool. The fan-out gave every
+  specialist the whole request and joined their outputs, so an answer held a
+  metric reading next to another specialist's statement that the reading was
+  unavailable; the chain returned its last link's output. Both now end with a
+  synthesis step: a tool-less agent reads the request and every agent's
+  finding and writes the answer (`SynthesizedPipelineRunnable`; the findings
+  stay on `raw.outputs`). A fan-out specialist is given its own part of the
+  request and reports what its tool returned. Each shape makes one more
+  model call (#634).
 
 ### Documentation
 

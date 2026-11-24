@@ -99,6 +99,7 @@ from locus.router.runnable import (
     ProtocolExecutionError,
     Runnable,
     RunnableResult,
+    SynthesizedPipelineRunnable,
 )
 from locus.router.runtime import FrameExtractionError, Router
 from locus.router.skill_index import SkillIndex
@@ -124,6 +125,7 @@ __all__ = [
     "PickedProtocol",
     "PickerError",
     "PipelineRunnable",
+    "SynthesizedPipelineRunnable",
     "ProtocolExecutionError",
     "PolicyDeniedError",
     "PolicyGate",

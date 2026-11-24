@@ -142,6 +142,65 @@ class PipelineRunnable(BaseModel):
         )
 
 
+class SynthesizedPipelineRunnable(PipelineRunnable):
+    """A pipeline whose agents gather findings and whose last step writes the answer.
+
+    A fan-out gives each specialist one tool, and a handoff chain gives each
+    link one: neither agent sees the whole picture, so their outputs joined
+    together are findings, not an answer. This runnable runs the pipeline,
+    then hands the request and every agent's finding to ``synthesizer``, a
+    tool-less agent that writes the answer the caller reads.
+
+    ``labels`` name the agents in pipeline order (the capability each one
+    serves) and head their findings in the synthesis prompt. ``part_prompt``
+    is the task a fan-out agent receives: it names the agent's own part of
+    the request, so a specialist reports what its tool returned instead of
+    commenting on what the other specialists cover. ``{task}`` and ``{label}``
+    are filled in; without a ``part_prompt`` every agent gets the pipeline's
+    own prompts.
+
+    ``raw`` is the pipeline's result, so each agent's finding stays on
+    ``raw.outputs``; ``text`` is the synthesizer's answer.
+    """
+
+    synthesizer: Any
+    labels: list[str] = Field(default_factory=list)
+    part_prompt: str | None = None
+
+    def _findings(self, outputs: list[str]) -> str:
+        blocks = []
+        for index, output in enumerate(outputs):
+            if not output.strip():
+                continue
+            label = self.labels[index] if index < len(self.labels) else f"agent {index + 1}"
+            blocks.append(f"[{label}]\n{output.strip()}")
+        return "\n\n".join(blocks)
+
+    async def execute(self, task: str) -> RunnableResult:
+        if self.part_prompt is not None:
+            task_map = {
+                index: self.part_prompt.format(task=task, label=label)
+                for index, label in enumerate(self.labels)
+            }
+            result = await self.pipeline.run(task, task_map=task_map)
+        else:
+            result = await self.pipeline.run(task)
+        findings = self._findings(list(result.outputs))
+        if not findings:
+            raise ProtocolExecutionError(self.protocol_id, result.error)
+        answer = await self.synthesizer.arun(
+            f"Request:\n{task}\n\nFindings:\n{findings}\n\n"
+            "Write the answer to the request from these findings."
+        )
+        return RunnableResult(
+            text=answer.message or "",
+            parsed=None,
+            raw=result,
+            protocol_id=self.protocol_id,
+            frame=self.frame,
+        )
+
+
 class OrchestratorRunnable(BaseModel):
     """Adapter from :class:`locus.Orchestrator` to :class:`Runnable`."""
 
@@ -271,6 +330,26 @@ def wrap_pipeline(
 ) -> Runnable:
     """Helper for any of the composition primitives."""
     return PipelineRunnable(pipeline=pipeline, protocol_id=protocol_id, frame=frame)
+
+
+def wrap_synthesized_pipeline(
+    pipeline: SequentialPipeline | ParallelPipeline,
+    synthesizer: Agent,
+    protocol_id: str,
+    frame: GoalFrame,
+    *,
+    labels: list[str],
+    part_prompt: str | None = None,
+) -> Runnable:
+    """Helper for a pipeline of one-tool agents followed by a synthesis step."""
+    return SynthesizedPipelineRunnable(
+        pipeline=pipeline,
+        synthesizer=synthesizer,
+        protocol_id=protocol_id,
+        frame=frame,
+        labels=labels,
+        part_prompt=part_prompt,
+    )
 
 
 def wrap_orchestrator(orchestrator: Orchestrator, protocol_id: str, frame: GoalFrame) -> Runnable:

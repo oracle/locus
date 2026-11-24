@@ -170,12 +170,8 @@ Using mock model (no API calls)
   Diagnose the spike in 5xx errors — pull recent alerts and the error_rate metric, correlate them.
   [extractor unavailable: Extractor did not produce a GoalFrame. parse_error='JSON parse error: Expecting value: line 1 column 1 (char 0)', message='Alert assessment: likely true positive. Recommend containment.'; using fallback frame]
   [protocol] specialist_fanout
-  [shape]    ParallelPipeline of N tool-bound Agents
+  [shape]    ParallelPipeline of N tool-bound Agents + synthesis Agent
   [result]
-  Alert assessment: likely true positive. Recommend containment.
-
-  ---
-
   Alert assessment: likely true positive. Recommend containment.
 
 === Prompt 4 ===

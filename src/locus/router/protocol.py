@@ -34,6 +34,7 @@ from locus.router.runnable import (
     wrap_agent,
     wrap_debate,
     wrap_pipeline,
+    wrap_synthesized_pipeline,
 )
 
 
@@ -345,52 +346,97 @@ def _build_plan_execute_validate(
     return wrap_pipeline(pipeline, "plan_execute_validate", frame)
 
 
+#: What the synthesis step of a multi-agent shape is told, after its role.
+_SYNTHESIS_RULES = (
+    "Each finding below comes from an agent that had one tool and reports what "
+    "that tool returned. Write the answer to the request from the findings, and "
+    "relate them to each other where the request asks for it. Use only data the "
+    "findings contain; never add figures of your own. When a finding says a "
+    "source had nothing, or the findings lack something the request needs, say "
+    "what is missing in one sentence instead of guessing. Do not mention the "
+    "agents, their tools or these instructions."
+)
+
+
+def _synthesizer(ctx: BuilderContext, frame: GoalFrame, role: str, plugins: Any) -> Any:
+    """The tool-less agent that writes a multi-agent shape's answer."""
+    return _agent(
+        ctx,
+        tools=[],
+        system_prompt=(
+            f"You are {role} for a {frame.primary_goal.value} request in the "
+            f"{frame.domain} domain. {_SYNTHESIS_RULES}"
+        ),
+        plugins=plugins,
+    )
+
+
 def _build_specialist_fanout(
     frame: GoalFrame, capabilities: list[Capability], ctx: BuilderContext
 ) -> Runnable:
-    """Fan out to one tool-bound :class:`Agent` per capability.
+    """Fan out to one tool-bound :class:`Agent` per capability, then synthesise.
 
     We use :class:`ParallelPipeline` rather than
     :class:`Orchestrator` + :class:`Specialist` because ``Specialist``
     does a single-turn ``model.complete()`` (it sends tool schemas but
     doesn't loop on tool calls), so models that respond with "I'll do
     X" never actually invoke their bound tool. ``Agent`` runs the full
-    locus agent loop and processes tool calls properly. The outputs
-    from each capability-bound agent are concatenated; correlation
-    across specialists is a follow-up.
+    locus agent loop and processes tool calls properly.
+
+    Each specialist is given its own part of the request and reports what
+    its tool returned. A last agent with no tools reads every finding and
+    writes the answer, so the result relates the findings instead of listing
+    them side by side.
     """
     from locus.agent.agent import Agent
     from locus.agent.composition import ParallelPipeline
 
     plugins = _domain_skill_plugins(frame, ctx)
     agents: list[Agent] = []
+    labels: list[str] = []
     for cap in capabilities:
         if cap.is_human:
             continue
         tool_obj = ctx.capabilities.resolve_tool(cap)
+        labels.append(cap.id)
         agents.append(
             _agent(
                 ctx,
                 tools=[tool_obj],
                 system_prompt=(
                     f"You are the {cap.id} specialist for the {cap.domain} "
-                    f"domain. You have exactly one tool: {tool_obj.name}.\n\n"
+                    f"domain. You have exactly one tool: {tool_obj.name}. Other "
+                    f"specialists cover the parts of the request your tool "
+                    f"cannot.\n\n"
                     f"PROTOCOL — strict, no exceptions:\n"
                     f"1. Your FIRST action is to call {tool_obj.name}. Do "
                     f"NOT write any text before the tool call. Do NOT say "
-                    f"'I will' or 'let me' — just call the tool.\n"
-                    f"2. After the tool returns, your SECOND action is to "
-                    f"summarise the tool's output in 1-2 sentences. Then "
-                    f"stop.\n"
-                    f"3. If you find yourself wanting to answer from memory, "
-                    f"call {tool_obj.name} instead. The tool is the only "
-                    f"trustworthy source for {cap.domain} data."
+                    f"'I will' or 'let me' — just call the tool. Call it again "
+                    f"for each further item the request needs from it.\n"
+                    f"2. Then report what the tool returned that bears on the "
+                    f"request, keeping every figure and name exactly as "
+                    f"returned. Then stop.\n"
+                    f"3. Report only what {tool_obj.name} returned. Do not "
+                    f"answer from memory, and do not comment on the parts of "
+                    f"the request that need another tool."
                 ),
                 plugins=plugins,
             ),
         )
     pipeline = ParallelPipeline(agents=agents, merge_strategy="concatenate")
-    return wrap_pipeline(pipeline, "specialist_fanout", frame)
+    if not agents:
+        return wrap_pipeline(pipeline, "specialist_fanout", frame)
+    return wrap_synthesized_pipeline(
+        pipeline,
+        _synthesizer(ctx, frame, "the lead who answers from the specialists' findings", plugins),
+        "specialist_fanout",
+        frame,
+        labels=labels,
+        part_prompt=(
+            "Request: {task}\n\nYour part: gather what your tool ({label}) provides "
+            "for this request and report it."
+        ),
+    )
 
 
 def _build_debate(
@@ -541,6 +587,9 @@ def _build_handoff_chain(
 ) -> Runnable:
     """Sequential chain — each agent gets one capability and forwards.
 
+    A last agent with no tools reads every link's finding and writes the
+    answer, so the result is the whole chain's and not the last link's.
+
     Uses :class:`SequentialPipeline` of real :class:`Agent` instances
     rather than locus's native :class:`HandoffAgent` /
     :meth:`Handoff.chain_handoff` because those run a single-turn
@@ -552,10 +601,12 @@ def _build_handoff_chain(
 
     plugins = _domain_skill_plugins(frame, ctx)
     agents: list[Agent] = []
+    labels: list[str] = []
     for cap in capabilities:
         if cap.is_human:
             continue
         tool_obj = ctx.capabilities.resolve_tool(cap)
+        labels.append(cap.id)
         agents.append(
             _agent(
                 ctx,
@@ -564,7 +615,10 @@ def _build_handoff_chain(
                     f"You are link {cap.id} in a handoff chain for the "
                     f"{cap.domain} domain. Your one tool is {tool_obj.name}.\n\n"
                     f"1. Read what the previous link produced.\n"
-                    f"2. Use {tool_obj.name} to add the next concrete fact.\n"
+                    f"2. Call {tool_obj.name} for what the request needs from it, "
+                    f"and report what it returned, keeping every figure and name "
+                    f"exactly as returned. Do not comment on the parts of the "
+                    f"request that need another tool; another link covers them.\n"
                     f"3. Hand off cleanly: end your output with one line stating "
                     f"what the next link should focus on."
                 ),
@@ -586,7 +640,17 @@ def _build_handoff_chain(
             ),
         )
     pipeline = SequentialPipeline(agents=agents)
-    return wrap_pipeline(pipeline, "handoff_chain", frame)
+    if not labels:
+        return wrap_pipeline(pipeline, "handoff_chain", frame)
+    return wrap_synthesized_pipeline(
+        pipeline,
+        _synthesizer(
+            ctx, frame, "the last link, who writes the answer from every link's finding", plugins
+        ),
+        "handoff_chain",
+        frame,
+        labels=labels,
+    )
 
 
 def builtin_protocols() -> list[Protocol]:
@@ -624,7 +688,7 @@ def builtin_protocols() -> list[Protocol]:
         ),
         Protocol(
             id="specialist_fanout",
-            description="Fan out to multiple specialists and correlate findings.",
+            description="Fan out to multiple specialists and correlate their findings in one answer.",
             handles=[
                 TaskType.DIAGNOSE,
                 TaskType.COMPARE,
@@ -704,7 +768,7 @@ def builtin_protocols() -> list[Protocol]:
             id="handoff_chain",
             description=(
                 "Sequential chain of one-tool agents — each link adds one fact "
-                "and hands off to the next."
+                "and hands off to the next; a last agent writes the answer."
             ),
             handles=[TaskType.PLAN, TaskType.RESEARCH, TaskType.COORDINATE],
             primary_for=[TaskType.COORDINATE],
