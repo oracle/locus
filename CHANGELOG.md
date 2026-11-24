@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.6.1] - 2026-11-24
+
 ### Added
 
 - **The model catalogue covers the chat models OCI Generative AI serves.**
