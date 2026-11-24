@@ -11,9 +11,11 @@ hundredth a day, did the suite itself change under the numbers. A
 suite and by fingerprint, and :func:`trend` reads the last N of one suite
 back, newest first, and says where each moved against the one before it.
 
-Four stores share one interface:
+Five stores share one interface:
 
 - :class:`FileReportStore`: a directory, one JSON file per report.
+- :class:`SqliteReportStore`: one SQLite database file, a local history a
+  query can read without a server.
 - :class:`OracleReportStore`: a table on an Oracle AI Database, the report
   as JSON with its headline figures in columns, so a query can trend a
   suite without reading every report.
@@ -24,6 +26,7 @@ Four stores share one interface:
 ``locus eval run --store`` and ``locus eval trend`` name theirs::
 
     file:///var/lib/locus/evals          or a bare path
+    sqlite:///var/lib/locus/evals.db     or sqlite://evals.db, relative
     oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS
     oci://<namespace>/<bucket>/<prefix>?profile=DEFAULT&region=eu-frankfurt-1
     s3://<bucket>/<prefix>?endpoint_url=https://...
@@ -39,8 +42,10 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import threading
 from collections.abc import Callable
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -64,6 +69,7 @@ __all__ = [
     "OracleReportStore",
     "ReportStore",
     "S3ReportStore",
+    "SqliteReportStore",
     "StoredReport",
     "Trend",
     "TrendPoint",
@@ -289,6 +295,160 @@ class FileReportStore(_ObjectStore):
             for path in self.directory.rglob("*.json")
             if str(path.relative_to(self.directory)).replace(os.sep, "/").startswith(prefix)
         )
+
+
+class SqliteReportStore:
+    """Reports in one SQLite database file: a local, queryable history, no server.
+
+    One table holds a row per report, the report as JSON with its headline
+    figures in columns (as :class:`OracleReportStore` keeps them), indexed
+    on suite and on timestamp, so ``list()`` and a trend read no report
+    body. The file and the table are created on the first ``put()``; a
+    store whose file does not exist yet lists nothing.
+
+    Every call opens its own connection and closes it, so one store object
+    is safe to share between threads, and several processes can write to the
+    same file: SQLite serialises the writers, and ``timeout`` is how long
+    one waits for another before raising ``sqlite3.OperationalError``.
+
+    A ``report_id`` names one report: ``put()`` under an id the store
+    already holds replaces that report, so re-running ``build-42`` leaves
+    one row.
+
+    Args:
+        path: The database file. Its directory is created when missing.
+        table: Table name (letters, digits and underscores).
+        timeout: Seconds a writer waits for another writer's lock.
+    """
+
+    def __init__(
+        self, path: str | Path, *, table: str = "locus_eval_reports", timeout: float = 30.0
+    ) -> None:
+        if str(path).strip() in ("", ":memory:"):
+            raise ValueError(
+                "SqliteReportStore needs a database file path; an in-memory database "
+                "would not outlive a call"
+            )
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table):
+            raise ValueError(f"invalid table name {table!r}: letters, digits and underscores")
+        self.path = Path(path).expanduser()
+        self.table = table
+        self.timeout = timeout
+        self.spec = f"sqlite://{self.path}"
+
+    def ddl(self) -> list[str]:
+        """The statements this store runs before its first write."""
+        return [
+            f"CREATE TABLE IF NOT EXISTS {self.table} (\n"
+            "  report_id TEXT PRIMARY KEY,\n"
+            "  suite TEXT NOT NULL,\n"
+            "  fingerprint TEXT,\n"
+            "  created_at TEXT NOT NULL,\n"
+            "  total_cases INTEGER NOT NULL,\n"
+            "  passed INTEGER NOT NULL,\n"
+            "  failed INTEGER NOT NULL,\n"
+            "  not_graded INTEGER NOT NULL,\n"
+            "  avg_score REAL NOT NULL,\n"
+            "  report TEXT NOT NULL\n"
+            ")",
+            f"CREATE INDEX IF NOT EXISTS {self.table}_suite ON {self.table} (suite, created_at)",
+            f"CREATE INDEX IF NOT EXISTS {self.table}_created_at ON {self.table} (created_at)",
+        ]
+
+    def _connect(self) -> sqlite3.Connection:
+        return sqlite3.connect(self.path, timeout=self.timeout)
+
+    def _has_table(self, conn: sqlite3.Connection) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (self.table,)
+        ).fetchone()
+        return row is not None
+
+    def put(self, report: EvalReport, *, suite: str, report_id: str | None = None) -> StoredReport:
+        report_id = report_id or uuid4().hex
+        if not report_id.strip():
+            raise ValueError("report_id must not be blank")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # ``created_at`` is the fixed-width UTC stamp the file store puts in
+        # its names: it sorts as text in the order it sorts as time.
+        with closing(self._connect()) as conn, conn:
+            for statement in self.ddl():
+                conn.execute(statement)
+            conn.execute(
+                f"INSERT OR REPLACE INTO {self.table} "  # noqa: S608 - validated identifier
+                "(report_id, suite, fingerprint, created_at, total_cases, passed, failed, "
+                "not_graded, avg_score, report) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    report_id,
+                    suite,
+                    report.fingerprint,
+                    _stamp(report.created_at),
+                    report.total_cases,
+                    report.passed,
+                    report.failed,
+                    report.not_graded,
+                    report.avg_score,
+                    report.model_dump_json(),
+                ),
+            )
+        return StoredReport.of(
+            report, report_id=report_id, suite=suite, location=f"{self.path}:{report_id}"
+        )
+
+    def get(self, report_id: str) -> EvalReport | None:
+        if not self.path.is_file():
+            return None
+        with closing(self._connect()) as conn:
+            if not self._has_table(conn):
+                return None
+            row = conn.execute(
+                f"SELECT report FROM {self.table} WHERE report_id = ?",  # noqa: S608
+                (report_id,),
+            ).fetchone()
+        return None if row is None else EvalReport.model_validate_json(row[0])
+
+    def list(
+        self, *, suite: str | None = None, fingerprint: str | None = None, limit: int = 20
+    ) -> list[StoredReport]:
+        if not self.path.is_file():
+            return []
+        clauses: list[str] = []
+        binds: list[Any] = []
+        if suite is not None:
+            clauses.append("suite = ?")
+            binds.append(suite)
+        if fingerprint is not None:
+            clauses.append("fingerprint = ?")
+            binds.append(fingerprint)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        binds.append(max(0, limit))
+        with closing(self._connect()) as conn:
+            if not self._has_table(conn):
+                return []
+            rows = conn.execute(
+                "SELECT report_id, suite, fingerprint, created_at, total_cases, passed, "  # noqa: S608
+                f"failed, not_graded, avg_score FROM {self.table}{where} "
+                "ORDER BY created_at DESC, report_id DESC LIMIT ?",
+                binds,
+            ).fetchall()
+        return [
+            StoredReport(
+                report_id=row[0],
+                suite=row[1],
+                fingerprint=row[2],
+                created_at=_unstamp(row[3]),
+                total_cases=int(row[4]),
+                passed=int(row[5]),
+                failed=int(row[6]),
+                not_graded=int(row[7]),
+                avg_score=float(row[8]),
+                location=f"{self.path}:{row[0]}",
+            )
+            for row in rows
+        ]
+
+    def __repr__(self) -> str:
+        return f"SqliteReportStore(path={str(self.path)!r}, table={self.table!r})"
 
 
 class OCIBucketReportStore(_ObjectStore):
@@ -895,6 +1055,14 @@ def report_store(spec: str | None = None) -> ReportStore:
     if scheme in ("", "file"):
         path = spec[len("file://") :] if scheme == "file" else spec
         return FileReportStore(path)
+    if scheme == "sqlite":
+        # As file:// does: what follows the scheme is the path, so
+        # sqlite:///var/lib/evals.db is absolute and sqlite://evals.db relative.
+        options = _options(spec)
+        path = spec[len("sqlite://") :].partition("?")[0]
+        if "table" in options:
+            return SqliteReportStore(path, table=options["table"])
+        return SqliteReportStore(path)
     if scheme == "oracle":
         return _oracle(spec)
     if scheme == "oci":
@@ -902,7 +1070,8 @@ def report_store(spec: str | None = None) -> ReportStore:
     if scheme == "s3":
         return _s3(spec)
     raise ValueError(
-        f"unknown report store scheme {scheme!r}: expected file://, oracle://, oci:// or s3://"
+        f"unknown report store scheme {scheme!r}: "
+        "expected file://, sqlite://, oracle://, oci:// or s3://"
     )
 
 

@@ -4,9 +4,10 @@
 
 """Report stores and the trend across them.
 
-Four stores, one interface: a directory, an Oracle table, an OCI bucket and an
-S3 bucket. These tests pin the round trip and the listing order on each with
-doubles for the clients, the spec strings that open them, and the arithmetic
+Five stores, one interface: a directory, a SQLite file, an Oracle table, an OCI
+bucket and an S3 bucket. These tests pin the round trip and the listing order
+on each (the two local stores through one fixture, the others with doubles for
+the clients), the spec strings that open them, and the arithmetic
 of the trend: deltas against the previous point, a changed suite marked rather
 than read as a regression, and the newest point's regression deciding the
 verdict.
@@ -16,7 +17,11 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime, timedelta
+import sqlite3
+import subprocess
+import sys
+import threading
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +37,7 @@ from locus.evaluation import (
     OracleReportStore,
     ReportStore,
     S3ReportStore,
+    SqliteReportStore,
     StoredReport,
     report_store,
     trend,
@@ -80,15 +86,30 @@ def _three_reports(store: ReportStore, suite: str = "warden") -> list[StoredRepo
 
 
 # --------------------------------------------------------------------------
-# FileReportStore
+# The local stores: FileReportStore and SqliteReportStore, the same tests
 # --------------------------------------------------------------------------
 
 
-def test_file_store_round_trips_and_lists_newest_first(tmp_path: Path) -> None:
-    store = FileReportStore(tmp_path)
+@pytest.fixture(params=["file", "sqlite"])
+def local_store(request: pytest.FixtureRequest, tmp_path: Path) -> ReportStore:
+    if request.param == "file":
+        return FileReportStore(tmp_path)
+    return SqliteReportStore(tmp_path / "evals.db")
+
+
+def test_local_stores_name_their_spec(tmp_path: Path) -> None:
+    assert FileReportStore(tmp_path).spec == f"file://{tmp_path}"
+    store = SqliteReportStore(tmp_path / "evals.db")
+    assert store.spec == f"sqlite://{tmp_path}/evals.db"
+    assert (
+        repr(store) == f"SqliteReportStore(path='{tmp_path}/evals.db', table='locus_eval_reports')"
+    )
+
+
+def test_local_store_round_trips_and_lists_newest_first(local_store: ReportStore) -> None:
+    store = local_store
     stored = _three_reports(store)
     assert isinstance(store, ReportStore)
-    assert store.spec == f"file://{tmp_path}"
     assert stored[0].passed == 3
     assert stored[0].suite == "warden"
     loaded = store.get(stored[1].report_id)
@@ -103,16 +124,30 @@ def test_file_store_round_trips_and_lists_newest_first(tmp_path: Path) -> None:
     assert listed[1].avg_score == pytest.approx(2 / 3)
 
 
-def test_file_store_filters_by_suite_fingerprint_and_limit(tmp_path: Path) -> None:
-    store = FileReportStore(tmp_path)
+def test_local_store_filters_by_suite_fingerprint_and_limit(local_store: ReportStore) -> None:
+    store = local_store
     _three_reports(store)
     store.put(_report(passed=1, total=1, at=T0), suite="other suite/with slash")
     assert len(store.list()) == 4
     assert len(store.list(suite="warden")) == 3
     assert len(store.list(suite="warden", fingerprint="abcdefabcdef")) == 2
+    assert len(store.list(fingerprint="123456789abc")) == 1
     assert len(store.list(suite="warden", limit=1)) == 1
-    assert store.list(suite="other suite/with slash")[0].suite == "other-suite-with-slash"
+    assert store.list(suite="warden", limit=0) == []
+    assert len(store.list(suite="other suite/with slash")) == 1
+    assert store.list(suite="nothing") == []
+
+
+def test_a_suite_name_is_a_directory_in_the_file_store_and_itself_in_sqlite(
+    tmp_path: Path,
+) -> None:
+    files = FileReportStore(tmp_path)
+    files.put(_report(passed=1, total=1, at=T0), suite="other suite/with slash")
+    assert files.list(suite="other suite/with slash")[0].suite == "other-suite-with-slash"
     assert (tmp_path / "other-suite-with-slash").is_dir()
+    database = SqliteReportStore(tmp_path / "evals.db")
+    database.put(_report(passed=1, total=1, at=T0), suite="other suite/with slash")
+    assert database.list()[0].suite == "other suite/with slash"
 
 
 def test_file_store_ignores_files_that_are_not_reports(tmp_path: Path) -> None:
@@ -123,13 +158,13 @@ def test_file_store_ignores_files_that_are_not_reports(tmp_path: Path) -> None:
     assert FileReportStore(tmp_path / "absent").list() == []
 
 
-def test_a_report_the_runner_made_round_trips_with_its_results(tmp_path: Path) -> None:
+def test_a_report_the_runner_made_round_trips_with_its_results(local_store: ReportStore) -> None:
     from locus.agent import Agent
 
     report = EvalRunner(agent=Agent(model=ScriptedModel([text("yes")]))).run(
         [EvalCase(name="c", prompt="p", expected_output_contains=["yes"])]
     )
-    store = FileReportStore(tmp_path)
+    store = local_store
     stored = store.put(report, suite="s")
     loaded = store.get(stored.report_id)
     assert loaded is not None
@@ -413,6 +448,17 @@ def test_oracle_store_needs_oracledb_for_a_real_pool() -> None:
 def test_report_store_opens_each_scheme(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(report_store(str(tmp_path)), FileReportStore)
     assert isinstance(report_store(f"file://{tmp_path}"), FileReportStore)
+    sqlite = report_store(f"sqlite://{tmp_path}/evals.db")
+    assert isinstance(sqlite, SqliteReportStore)
+    assert sqlite.path == tmp_path / "evals.db"
+    assert sqlite.table == "locus_eval_reports"
+    monkeypatch.chdir(tmp_path)
+    relative = report_store("sqlite://history/evals.db?table=nightly")
+    assert isinstance(relative, SqliteReportStore)
+    assert (relative.path, relative.table) == (Path("history/evals.db"), "nightly")
+    relative.put(_report(passed=1, total=1, at=T0), suite="warden")
+    assert (tmp_path / "history" / "evals.db").is_file()
+    assert report_store(relative.spec).list() == [], "the spec names the file, not the table"
     oci = report_store(
         "oci://ns/bucket/some/prefix?profile=P&region=eu-frankfurt-1&auth=security_token"
     )
@@ -489,8 +535,8 @@ def test_report_store_rejects_what_it_cannot_open(monkeypatch: pytest.MonkeyPatc
 # --------------------------------------------------------------------------
 
 
-def test_trend_reads_the_last_reports_oldest_first_with_deltas(tmp_path: Path) -> None:
-    store = FileReportStore(tmp_path)
+def test_trend_reads_the_last_reports_oldest_first_with_deltas(local_store: ReportStore) -> None:
+    store = local_store
     _three_reports(store)
     result = trend(store, suite="warden", last=10)
     assert [p.passed for p in result.points] == [3, 2, 3]
@@ -512,8 +558,10 @@ def test_trend_reads_the_last_reports_oldest_first_with_deltas(tmp_path: Path) -
     assert "suite changed" in markdown
 
 
-def test_trend_narrowed_to_one_fingerprint_and_the_latest_regression(tmp_path: Path) -> None:
-    store = FileReportStore(tmp_path)
+def test_trend_narrowed_to_one_fingerprint_and_the_latest_regression(
+    local_store: ReportStore,
+) -> None:
+    store = local_store
     _three_reports(store)
     result = trend(store, suite="warden", fingerprint="abcdefabcdef")
     assert [p.passed for p in result.points] == [3, 2]
@@ -842,18 +890,21 @@ def test_specs_carry_the_optional_connection_settings(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.parametrize("report_id", ["build-42", "build42", "nightly/2026-11-16 #1"])
-def test_file_store_reads_back_a_report_stored_under_a_callers_id(
-    tmp_path: Path, report_id: str
+def test_local_store_reads_back_a_report_stored_under_a_callers_id(
+    local_store: ReportStore, report_id: str
 ) -> None:
-    store = FileReportStore(tmp_path)
+    store = local_store
     store.put(_report(passed=2, total=3, at=T0), suite="warden")
     stored = store.put(
         _report(passed=3, total=3, at=T0 + timedelta(hours=1)), suite="warden", report_id=report_id
     )
 
     assert stored.report_id == report_id
-    assert stored.location.startswith("warden/"), "the id cannot split the suite from the file"
-    assert stored.location.count("/") == 1
+    if isinstance(store, FileReportStore):
+        assert stored.location.startswith("warden/"), "the id cannot split the suite from the file"
+        assert stored.location.count("/") == 1
+    else:
+        assert stored.location.endswith(f"evals.db:{report_id}")
     loaded = store.get(report_id)
     assert loaded is not None
     assert loaded.passed == 3
@@ -900,6 +951,161 @@ def test_a_report_stored_under_a_generated_id_still_parses(tmp_path: Path) -> No
     assert stored.location.endswith(f"-{stored.report_id}.json"), "a generated id is not encoded"
 
 
-def test_a_blank_report_id_is_refused(tmp_path: Path) -> None:
+def test_a_blank_report_id_is_refused(local_store: ReportStore) -> None:
     with pytest.raises(ValueError, match="blank"):
-        FileReportStore(tmp_path).put(_report(passed=1, total=1), suite="warden", report_id="  ")
+        local_store.put(_report(passed=1, total=1), suite="warden", report_id="  ")
+    assert local_store.list() == []
+
+
+def test_a_generated_report_id_is_32_hex_on_both_local_stores(local_store: ReportStore) -> None:
+    stored = local_store.put(_report(passed=1, total=1, at=T0), suite="warden")
+    assert len(stored.report_id) == 32
+    assert int(stored.report_id, 16) >= 0
+    assert local_store.get(stored.report_id) is not None
+
+
+def test_local_stores_read_the_instant_back_whatever_zone_it_was_written_in(
+    local_store: ReportStore,
+) -> None:
+    paris = timezone(timedelta(hours=1))
+    local_store.put(_report(passed=1, total=1, at=T0.astimezone(paris)), suite="warden")
+    local_store.put(_report(passed=1, total=1, at=T0 - timedelta(minutes=30)), suite="warden")
+    listed = local_store.list(suite="warden")
+    assert [item.created_at for item in listed] == [T0, T0 - timedelta(minutes=30)]
+
+
+# --------------------------------------------------------------------------
+# SqliteReportStore: what only a database file has
+# --------------------------------------------------------------------------
+
+
+def test_sqlite_store_keeps_one_table_with_the_report_as_json_and_two_indexes(
+    tmp_path: Path,
+) -> None:
+    store = SqliteReportStore(tmp_path / "evals.db")
+    stored = _three_reports(store)
+    with sqlite3.connect(tmp_path / "evals.db") as conn:
+        objects = conn.execute(
+            "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
+        body = conn.execute(
+            "SELECT report FROM locus_eval_reports WHERE report_id = ?", (stored[1].report_id,)
+        ).fetchone()[0]
+        # The headline figures are columns: a trend is one query, no report read.
+        rows = conn.execute(
+            "SELECT passed, total_cases FROM locus_eval_reports "
+            "WHERE suite = 'warden' ORDER BY created_at"
+        ).fetchall()
+    conn.close()
+    assert objects == [
+        ("table", "locus_eval_reports"),
+        ("index", "locus_eval_reports_created_at"),
+        ("index", "locus_eval_reports_suite"),
+    ]
+    assert json.loads(body)["passed"] == 2
+    assert rows == [(3, 3), (2, 3), (3, 3)]
+    assert len(store.ddl()) == 3
+
+
+def test_sqlite_store_reads_nothing_from_a_file_it_has_not_written(tmp_path: Path) -> None:
+    absent = SqliteReportStore(tmp_path / "nowhere" / "evals.db")
+    assert absent.list() == []
+    assert absent.get("anything") is None
+    assert not (tmp_path / "nowhere").exists(), "reading does not create the file"
+
+    # A database another tool made, without this store's table.
+    other = tmp_path / "other.db"
+    with sqlite3.connect(other) as conn:
+        conn.execute("CREATE TABLE unrelated (x)")
+    conn.close()
+    store = SqliteReportStore(other)
+    assert store.list() == []
+    assert store.get("anything") is None
+    store.put(_report(passed=1, total=1, at=T0), suite="warden", report_id="build-1")
+    assert [item.report_id for item in store.list()] == ["build-1"]
+
+
+def test_sqlite_store_replaces_a_report_put_again_under_the_same_id(tmp_path: Path) -> None:
+    store = SqliteReportStore(tmp_path / "evals.db")
+    store.put(_report(passed=1, total=3, at=T0), suite="warden", report_id="build-42")
+    store.put(
+        _report(passed=3, total=3, at=T0 + timedelta(hours=1)), suite="warden", report_id="build-42"
+    )
+    listed = store.list(suite="warden")
+    assert [(item.report_id, item.passed) for item in listed] == [("build-42", 3)]
+    loaded = store.get("build-42")
+    assert loaded is not None
+    assert loaded.passed == 3
+
+
+def test_sqlite_store_refuses_a_path_or_a_table_it_cannot_use(tmp_path: Path) -> None:
+    for path in (":memory:", "", "  "):
+        with pytest.raises(ValueError, match="database file path"):
+            SqliteReportStore(path)
+    with pytest.raises(ValueError, match="invalid table name"):
+        SqliteReportStore(tmp_path / "evals.db", table="reports; DROP TABLE x")
+    with pytest.raises(ValueError, match="database file path"):
+        report_store("sqlite://")
+
+
+def test_sqlite_store_takes_writers_from_several_threads_at_once(tmp_path: Path) -> None:
+    store = SqliteReportStore(tmp_path / "evals.db")
+    errors: list[BaseException] = []
+
+    def write(worker: int) -> None:
+        try:
+            for n in range(10):
+                store.put(
+                    _report(passed=1, total=1, at=T0 + timedelta(seconds=worker * 100 + n)),
+                    suite="warden",
+                    report_id=f"w{worker}-{n}",
+                )
+                assert store.get(f"w{worker}-{n}") is not None
+        except BaseException as exc:  # noqa: BLE001 - reported by the assert below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write, args=(worker,)) for worker in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    listed = store.list(suite="warden", limit=1000)
+    assert len(listed) == 80
+    assert len({item.report_id for item in listed}) == 80
+    assert listed[0].report_id == "w7-9"
+
+
+_WRITER = """
+import sys
+from datetime import UTC, datetime, timedelta
+from locus.evaluation import EvalReport, SqliteReportStore
+
+path, worker = sys.argv[1], int(sys.argv[2])
+store = SqliteReportStore(path)
+start = datetime(2026, 11, 16, 9, 0, tzinfo=UTC)
+for n in range(25):
+    report = EvalReport(results=[], total_cases=1, passed=1, failed=0, avg_score=1.0)
+    report.created_at = start + timedelta(seconds=worker * 100 + n)
+    store.put(report, suite="warden", report_id=f"p{worker}-{n}")
+"""
+
+
+def test_sqlite_store_takes_writers_from_several_processes_on_a_new_file(tmp_path: Path) -> None:
+    # Four processes race to create the file and the table, then interleave
+    # their writes; every row has to be there afterwards.
+    path = tmp_path / "shared" / "evals.db"
+    writers = [
+        subprocess.Popen(  # noqa: S603 - this interpreter, a fixed script
+            [sys.executable, "-c", _WRITER, str(path), str(worker)],
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for worker in range(4)
+    ]
+    failures = [(w.communicate()[1], w.returncode) for w in writers]
+    assert [code for _err, code in failures] == [0, 0, 0, 0], failures
+    listed = SqliteReportStore(path).list(suite="warden", limit=1000)
+    assert len(listed) == 100
+    assert len({item.report_id for item in listed}) == 100

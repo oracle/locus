@@ -673,8 +673,8 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run.add_argument("--report", help="write the report as JSON here")
     eval_run.add_argument(
         "--store",
-        help="also keep the report in a store: a directory, file://, oracle://, oci:// or "
-        "s3:// (see locus.evaluation.stores)",
+        help="also keep the report in a store: a directory, file://, sqlite://, oracle://, "
+        "oci:// or s3:// (see locus.evaluation.stores)",
     )
     eval_run.add_argument(
         "--suite",
@@ -713,7 +713,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_trend.add_argument(
         "--store",
-        help="the report store: a directory, file://, oracle://, oci:// or s3:// "
+        help="the report store: a directory, file://, sqlite://, oracle://, oci:// or s3:// "
         "(default: $LOCUS_EVAL_STORE)",
     )
     eval_trend.add_argument(

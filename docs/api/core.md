@@ -41,6 +41,7 @@ for, e.g., a checkpoint miss vs. a model throttle.
 
 ::: locus.core.errors.LocusError
 ::: locus.core.errors.ConfigError
+::: locus.core.errors.UnknownProviderError
 ::: locus.core.errors.ValidationError
 
 ### Model errors
