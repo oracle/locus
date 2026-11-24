@@ -235,3 +235,22 @@ def test_a_chain_with_no_capability_stays_a_single_answering_agent() -> None:
     assert isinstance(runnable, PipelineRunnable)
     assert not isinstance(runnable, SynthesizedPipelineRunnable)
     assert len(runnable.pipeline.agents) == 1
+
+
+@pytest.mark.parametrize("reply", ["", "  \n"])
+async def test_an_empty_synthesis_is_a_failed_dispatch(reply: str) -> None:
+    """The findings arrived, the writer said nothing: no success with empty text."""
+    writer = _Writer(reply)
+    runnable = SynthesizedPipelineRunnable(
+        pipeline=ParallelPipeline(agents=[_Agent("latency_p99 is 1840 ms"), _Agent("x")]),
+        synthesizer=writer,
+        protocol_id="specialist_fanout",
+        frame=_frame(),
+        labels=["metric_probe", "alert_list"],
+    )
+
+    with pytest.raises(ProtocolExecutionError, match=r"specialist_fanout.*produced no text"):
+        await runnable.execute("Why is checkout slow?")
+    # The synthesis was attempted, with the findings in hand.
+    assert len(writer.prompts) == 1
+    assert "[metric_probe]\nlatency_p99 is 1840 ms" in writer.prompts[0]
