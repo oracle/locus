@@ -44,7 +44,7 @@ python examples/<file>.py
     and [Oracle Cloud and Database 26ai](#oracle-cloud-and-database-26ai). The
     five gate examples are under [Control layer and security](#control-layer-and-security).
 
-The series runs 01 to 80, ordered by topic: start here, the multi-agent shapes, Oracle Cloud and Database 26ai, the harness, observability and serving, the control layer, and real-world workflows. Each entry below links to the example's page, which carries the source and names any database or service the example needs beyond the model.
+The series runs 01 to 81, ordered by topic: start here, the multi-agent shapes, Oracle Cloud and Database 26ai, the harness, observability and serving, the control layer, real-world workflows, and benchmarks. Each entry below links to the example's page, which carries the source and names any database or service the example needs beyond the model.
 
 <div class="notebook-filter">
   <input
@@ -158,3 +158,7 @@ The series runs 01 to 80, ordered by topic: start here, the multi-agent shapes, 
 - **78 · [Concession approval](notebook_78_concession_approval.md)** — customer-support concession approval with risk-tiered gates
 - **79 · [Contract review](notebook_79_contract_review.md)** — vendor DPA review — data-subject rights, retention, transfer gaps
 - **80 · [Vendor integrations](notebook_80_vendor_integrations.md)** — live vendor integrations — PII discovery, data map, scan dispatch
+
+## Benchmarks
+
+- **81 · [Router benchmark](notebook_81_router_benchmark.md)** — typed router against a free-form baseline on a labelled corpus, and difficulty measured from outcomes

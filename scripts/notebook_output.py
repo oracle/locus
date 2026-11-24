@@ -73,6 +73,7 @@ PAGES: dict[str, str] = {
     "notebook_75_cloud_resource_gate": "a staging resize allowed, then a production terminate and an IAM grant held",
     "notebook_78_concession_approval": "each ticket's risk tier and the gates it climbs: the 12/100 credit approved with no gate, the manager gate alone at 38, the manager then the billing lead at 62 (where the scripted reviewer says no, so the director gate is never reached) and all three gates at 88; the decision itself prints as `(missing)` because the mock model cannot fill the `ConcessionDecision` schema, as the Run it section explains",
     "notebook_80_vendor_integrations": "the offline sample each integration returns: the risk verdict for three identifiers, the two catalog records that hold the subject's data with their sensitivity, and the four PII categories a scan of `crm.customers` finds, then the STEWARD triage result",
+    "notebook_81_router_benchmark": "the eleven sampled cases with the protocol each should reach, the pass rate per tag for the corpus's own frame and for a rule that reads the first verb, the gate naming the three traps the rule sends to an expensive shape, and a skip notice for the two parts that call a model",
 }
 
 _MARKER = "## Output"

@@ -371,6 +371,8 @@ nav:
       - 78 · Concession approval: notebooks/notebook_78_concession_approval.md
       - 79 · Contract review: notebooks/notebook_79_contract_review.md
       - 80 · Vendor integrations: notebooks/notebook_80_vendor_integrations.md
+    - Benchmarks:
+      - 81 · Router benchmark: notebooks/notebook_81_router_benchmark.md
 - API reference:
   - Overview: api/index.md
   - Agent: api/agent.md
