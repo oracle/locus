@@ -8,6 +8,15 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **An empty synthesis is a failed dispatch.** `SynthesizedPipelineRunnable`
+  returned a `RunnableResult` with empty `text` when the synthesis agent
+  replied with nothing, so `Router.dispatch` reported a successful run with
+  nothing to show while the findings sat on `raw.outputs`. It now raises
+  `ProtocolExecutionError`, as a pipeline that produced no finding already
+  did, and the dispatcher publishes it as `router.runnable.failed`.
+
 ### Documentation
 
 - **Notebook 81, the router benchmark.** A runnable walk through the routing

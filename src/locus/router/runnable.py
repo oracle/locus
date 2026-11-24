@@ -160,7 +160,9 @@ class SynthesizedPipelineRunnable(PipelineRunnable):
     own prompts.
 
     ``raw`` is the pipeline's result, so each agent's finding stays on
-    ``raw.outputs``; ``text`` is the synthesizer's answer.
+    ``raw.outputs``; ``text`` is the synthesizer's answer. A synthesis that
+    produced no text is a failed dispatch, raised as
+    :class:`ProtocolExecutionError` like a pipeline that produced no finding.
     """
 
     synthesizer: Any
@@ -192,8 +194,11 @@ class SynthesizedPipelineRunnable(PipelineRunnable):
             f"Request:\n{task}\n\nFindings:\n{findings}\n\n"
             "Write the answer to the request from these findings."
         )
+        text = answer.message or ""
+        if not text.strip():
+            raise ProtocolExecutionError(self.protocol_id, "the synthesis step produced no text")
         return RunnableResult(
-            text=answer.message or "",
+            text=text,
             parsed=None,
             raw=result,
             protocol_id=self.protocol_id,
