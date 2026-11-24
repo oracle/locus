@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-11-24
+
 ### Added
 
 - **`multiagent.graph.node.routed`.** A `StateGraph` run publishes one event
