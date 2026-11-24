@@ -76,6 +76,65 @@ machine, force the mock model:
 LOCUS_MODEL_PROVIDER=mock python examples/notebook_17_graph_advanced.py
 ```
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints a node succeeding on its third attempt under `RetryPolicy`, a cached node called once for two runs, the graph as Mermaid and as text, three `emit_custom` progress events ahead of the node's update, and a model call retried after a first failure; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: RetryPolicy ===
+
+Success: True
+Attempts needed: 3
+Instance: web-01 RUNNING (VM.Standard.E4.Flex, us-ashburn-1 AD-1)
+
+=== Part 2: CachePolicy ===
+
+Call count: 1
+Both same result: True
+
+=== Part 3: Diagrams ===
+
+Mermaid (paste into https://mermaid.live):
+graph TD
+    __START__([Start])
+    __END__([End])
+    launch[launch]
+    attach[attach]
+    healthcheck[healthcheck]
+
+    __START__ --> launch
+    launch --> attach
+    healthcheck --> __END__
+    attach -.->|healthcheck| healthcheck
+    attach -.->|__END__| __END__
+
+ASCII:
+[Start] --> [launch]
+[launch] --> [attach]
+[attach] --> {healthcheck, End}
+[healthcheck] --> [End]
+
+=== Part 4: Live streaming with emit_custom ===
+
+  [CUSTOM]  {'stage': 1, 'of': 3}
+  [CUSTOM]  {'stage': 2, 'of': 3}
+  [CUSTOM]  {'stage': 3, 'of': 3}
+  [UPDATE]  provision: {'done': True}
+
+Delivered 3 custom events + 1 updates.
+
+=== Part 5: RetryPolicy around a real LLM call ===
+
+  [model call: 2.28s · 52→24 tokens]
+Attempts needed: 2 (first failed, RetryPolicy re-ran the node)
+Summary: The instance pool automatically increased from 2 to 6 instances because CPU usage remained above 80% for ten minutes.
+
+============================================================
+Next: Notebook 18 — Payment dispute triage with the functional API
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_17_graph_advanced.py`"

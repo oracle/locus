@@ -112,6 +112,57 @@ LOCUS_MODEL_PROVIDER=openai LOCUS_MODEL_ID=gpt-4o python examples/notebook_11_mo
 - [How-to: Configure a model provider](../how-to/configure-providers.md) —
   per-provider environment variables and model ids
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the provider prefixes the registry knows, three provider classes constructed without a network call, one live call through the configured provider, and the same prompt with the model's own temperature and then with `model_kwargs={'temperature': 0}` for one run; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Available providers ===
+
+Registered providers: ['openai', 'anthropic', 'ollama', 'vllm', 'lmstudio', 'llamacpp', 'litellm', 'groq', 'together', 'runpod', 'openrouter', 'deepseek', 'mistral', 'xai', 'fireworks', 'cerebras', 'perplexity', 'nvidia', 'gemini', 'openai-compatible', 'oci']
+
+Usage:
+  model = get_model("oci:openai.gpt-5.5")
+  model = get_model("openai:gpt-4o")
+  model = get_model("anthropic:claude-sonnet-5-5")
+
+The provider prefix before the colon selects the client; the rest
+is the model id that provider expects. See docs/concepts/models.md.
+
+=== Part 2: Direct provider usage ===
+
+  OCI GenAI — OCIChatCompletionsModel (profile from OCI_PROFILE)
+    -> OCIChatCompletionsModel ready
+  OpenAI — OpenAIModel (OPENAI_API_KEY read at call time)
+    -> OpenAIModel ready
+  Anthropic — AnthropicModel (ANTHROPIC_API_KEY read at call time)
+    -> AnthropicModel ready
+
+=== Part 3: Live provider call ===
+
+  Model class: OCIChatCompletionsModel
+  [model call: 1.77s · 48→14 tokens]
+  Reply:       Centralized control over security/policy enforcement and simplified monitoring/logging.
+
+=== Part 4: Request parameters ===
+
+Model's own temperature:
+  [model call: 1.03s · 40→18 tokens]
+  Pinning temperature to 0 ensures deterministic, consistent responses crucial for reliable runbook automation.
+
+Same agent, model_kwargs={'temperature': 0} for this run only:
+  [model call: 0.97s · 40→17 tokens]
+  Pinning temperature to 0 ensures deterministic, consistent outputs for reliable runbook automation.
+
+The mock answers identically either way; on a live model the second
+reply is the deterministic one. Nothing about the agent or its model changed.
+
+============================================================
+Next: Notebook 12 — Data-subject-request triage pipeline as a graph
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_11_model_providers.py`"

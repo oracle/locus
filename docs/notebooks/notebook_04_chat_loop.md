@@ -80,6 +80,31 @@ reloaded with the `thread_id`.
   the same checkpointer, with the saved state loaded back and inspected
   (notebook 05).
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the scripted three-turn conversation: a greeting, a `get_weather` call for the city named a turn earlier, and the name from the first turn repeated back on the third; the model's wording and the timings differ from run to run:
+
+```text
+(no terminal detected — replaying a scripted conversation)
+
+  you  : My name is Marta and I'm looking at flights to Lisbon.
+  agent: Hi Marta! Lisbon is a fantastic destination. Do you need information on flights, things to do, or perhaps the current weather in Lisbon?
+
+  you  : What's the weather there?
+    · get_weather({'city': 'Lisbon'})
+  agent: Lisbon is currently 18°C with light rain.
+
+  you  : What did I say my name was?
+  agent: You said your name is Marta.
+
+The third answer is only possible because the first turn was saved.
+
+============================================================
+Next: Notebook 05 — Conversation memory: remembering what you told it
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_04_chat_loop.py`"

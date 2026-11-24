@@ -70,6 +70,65 @@ network team:
 LOCUS_MODEL_PROVIDER=mock python examples/notebook_13_conditional_routing.py
 ```
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the branch each router takes: page or auto-resolve on confidence, the four-step severity ladder, two routers in sequence, the default fallback for an unmatched alert family, routing on several fields at once, and a model choosing the owning team for three alerts; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Binary branch — page or auto-resolve ===
+
+Confidence 95%: Escalated: 95% anomaly confidence — paging on-call SRE.
+Confidence 40%: Auto-resolved: 40% anomaly confidence is below the paging threshold; alert kept on record.
+
+=== Part 2: Multi-way branch — severity ladders ===
+
+CRITICAL: Paging on-call SRE — CRITICAL outage (SLA 15 minutes)
+HIGH: Assigned to the platform team (SLA 1 hour)
+MEDIUM: Queued for triage (SLA 24 hours)
+LOW: Batched for weekly review (SLA 1 week)
+
+=== Part 3: Two routers in sequence ===
+
+Webhook key: forged..., Role: operator
+  -> Alert from untrusted webhook discarded
+Webhook key: webhoo..., Role: readonly
+  -> Read-only viewer opened a remediation ticket
+Webhook key: webhoo..., Role: operator
+  -> Operator rolled back the affected service
+
+=== Part 4: Default fallback ===
+
+Alert family 'compute': Compute Platform Team
+Alert family 'storage': Storage Platform Team
+Alert family 'database': General on-call queue (unmatched family)
+Alert family 'xyz': General on-call queue (unmatched family)
+
+=== Part 5: Routing on multiple fields ===
+
+Incident: error rate 2.5%, standard, 2 instances
+  -> Standard queue: 24 hours
+Incident: error rate 2.5%, tier_zero, 2 instances
+  -> Priority queue: 4 hours
+Incident: error rate 35.0%, standard, 2 instances
+  -> Priority queue: 4 hours
+Incident: error rate 35.0%, tier_zero, 20 instances
+  -> Paged the incident commander: Immediate
+
+=== Part 6: LLM as the router ===
+
+  [model call: 1.65s · 51→1 tokens]
+  'CPU pinned at 100% on autoscaling group …' → Compute Platform Team
+  [model call: 1.00s · 48→1 tokens]
+  'Object store bucket prod-assets returnin…' → Storage Platform Team
+  [model call: 1.23s · 53→1 tokens]
+  'Cross-region VPC peering link dropping 4…' → Network Platform Team
+
+============================================================
+Next: Notebook 14 — Merging multi-check payment signals with state reducers
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_13_conditional_routing.py`"

@@ -119,6 +119,49 @@ python examples/notebook_01_oci_transports.py --transport v1
 - [OCI OpenAI-compatible endpoints](https://docs.oracle.com/iaas/Content/generative-ai/openai-compatible-api.htm) — V1 transport
 - [OCI Responses API](https://docs.oracle.com/iaas/Content/generative-ai/responses-api.htm) — Responses transport
 
+## Output
+
+Running it with an OCI profile set prints the same one-sentence answer from each transport, with `server_stateful: True` only on the Responses path, then the decision table that sets the three classes side by side:
+
+```text
+=== OCIResponsesModel (server-stateful) ===
+
+  reply:           The blue whale is the largest mammal on Earth.
+  iterations:      1
+  server_stateful: True
+
+=== OCIModel (OCI SDK, Cohere) ===
+
+  reply:           The largest mammal on Earth is the blue whale.
+  iterations:      1
+  server_stateful: False
+
+=== OCIChatCompletionsModel (OpenAI-compatible endpoint, default) ===
+
+  reply:           The blue whale is the largest mammal on Earth.
+  iterations:      1
+  server_stateful: False
+
+=== Decision table ===
+
+Field                  Responses (server-stateful)           OCIModel (SDK)                 OCIChatCompletionsModel (default)
+---------------------  ------------------------------------  -----------------------------  ---------------------------------
+Endpoint               /openai/v1/responses                  /20231130/actions/chat         /openai/v1/chat/completions
+Class                  OCIResponsesModel                     OCIModel                       OCIChatCompletionsModel
+Stateful?              server-side                           stateless                      stateless
+Model families         openai, xai, gemini (Responses-only)  cohere.command-r*, command-a*  all (default)
+Project OCID           optional                              no                             no
+ConversationManager    skipped                               applies                        applies
+Memory / hooks / GSAR  all apply                             all apply                      all apply
+Streaming              yes (SSE)                             yes                            yes (SSE)
+Structured output      yes                                   limited                        yes
+
+======================================================================
+Next: notebook 33 — OCIChatCompletionsModel deep dive (the default path)
+======================================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_01_oci_transports.py`"

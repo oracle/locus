@@ -77,6 +77,42 @@ loop in Part 3 never sees APPROVED and stops when `max_loops` is reached.
 - [Notebook 20 — Scatter-gather with `Send`](notebook_20_map_reduce_support_triage.md) — the same fan-out shape inside a `StateGraph`, for fan-out that needs shared state.
 - [Notebook 63 — Event catalogue](notebook_63_event_catalogue.md) — the `composition.*` events the pipelines publish inside a `run_context`.
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the first characters of each stage of a sequential pipeline, both branches and the merged text of a parallel one, a loop that stops on its first iteration because the condition is met, and the classes the one-line helpers return; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Sequential — PII summary then privacy-impact write-up ===
+
+Stage 1 (PII summary): The three most significant personal-data exposures in the customer_analytics table are:
+
+1. **Storag...
+Stage 2 (DPIA write-up): **Data Protection Impact Assessment (DPIA) – Inventory Summary for customer_analytics Table**
+
+The c...
+Duration: 5225ms
+
+=== Part 2: Parallel — privacy risks vs safeguards in one call ===
+
+Risks: 1. **Unintended Disclosure**: Combining internal and third-party data increases the risk of exposing...
+Safeguards: 1. Use data minimization: Only collect and integrate data strictly necessary for marketing purposes....
+Merged: 1. **Unintended Disclosure**: Combining internal and third-party data increases the risk of exposing sensitive or previously unlinked personal informa...
+
+=== Part 3: Loop — iterate until APPROVED or max_loops ===
+
+Iterations: 1
+Final: Dear Jane Doe,
+
+Thank you for your data-subject access request. We have processed your request and c...
+
+=== Part 4: One-liner helpers ===
+
+sequential(reviewer, editor) -> SequentialPipeline
+parallel(reviewer, editor)   -> ParallelPipeline
+loop(editor, condition, max_loops=3) -> LoopAgent
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_19_composition.py`"

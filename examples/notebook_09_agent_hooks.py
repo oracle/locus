@@ -208,7 +208,10 @@ async def example_validation_hook():
     agent = Agent(
         model=model,
         tools=[adjust_capacity],
-        system_prompt="Use the adjust_capacity tool. Try large numbers if asked.",
+        system_prompt=(
+            "Use the adjust_capacity tool and report the value it returns. "
+            "Try large numbers if asked."
+        ),
         hooks=[ValidationHook(max_value=100)],
     )
 

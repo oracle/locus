@@ -8,6 +8,27 @@ policy.
 
 ## [Unreleased]
 
+### Documentation
+
+- Fifteen more notebook pages show what a run prints: pages 01, 02, 04–07,
+  09, 11–14 and 16–19 gain an `## Output` section captured from a live-model
+  run and trimmed by hand, since these notebooks show little under the mock
+  model or print wall-clock timings; a docs test holds every Output section
+  to the page shape and to carrying nothing that names an account or a
+  machine (#544, #545).
+
+### Fixed
+
+- Three notebooks behaved differently on a live model than their pages
+  describe. Notebook 01 called `cohere.command-r-plus-08-2024` on the SDK
+  transport, which on-demand serving no longer offers, so that section
+  printed a 404; it now calls `cohere.command-a-03-2025`, and its decision
+  table sizes its columns to their content. Notebook 07's nested-schema
+  prompt names the top-level keys, so the model's JSON validates as
+  `Customer` instead of arriving wrapped. Notebook 09's validation-hook
+  agent is told to report the value the tool returns, so the reply shows
+  the clamped result (200) rather than arithmetic on the unclamped request.
+
 ## [6.4.0] - 2026-11-23
 
 ### Added

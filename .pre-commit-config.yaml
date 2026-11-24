@@ -136,7 +136,9 @@ repos:
         #   apending    — ``DatabaseApprovals.apending``, the awaitable ``pending()``
         #   sie, als, fonction, hace — German, French and Spanish words in
         #                 the completion check's multilingual patterns and tests
-    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,apending,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin,sie,als,fonction,hace
+        #   returnin, storag — words the notebooks cut mid-way when they print the
+        #                 first characters of a string (captured Output sections)
+    - --ignore-words-list=te,whats,re-use,pres,reqeusts,unparseable,apending,transferrin,transferring,ferritin,hepcidin,ferroportin,deferoxamine,deferasirox,deferiprone,erythroferrone,hemojuvelin,IRIDA,IDA,ACD,nin,sie,als,fonction,hace,returnin,storag
         # *.jsonl and *.pem: generated conformance fixtures (ASCII-escaped
         # UTF-8 such as ``caf\u00e9`` reads as a misspelling) and key material.
     - --skip=*.lock,*.json,*.jsonl,*.pem,*.yaml,*.yml,*.svg,*.gif,*.png,*.jpg,*.pdf

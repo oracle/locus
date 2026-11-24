@@ -77,6 +77,78 @@ example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
 - [SSE streaming](notebook_64_sse_streaming.md) — the same events turned
   into SSE frames by `SSEHandler` and `AsyncSSEHandler` (notebook 64).
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the console view of a two-tool triage (`[Thinking...]`, `[Running] … Done`), the counts and timings collected from the event stream, a progress bar advanced by tool completions and a reply streamed as it is generated; Parts 1 and 3 and the closing `StructuredStream` note are elided (`...`); the model's wording and the timings differ from run to run:
+
+```text
+=== Part 2: Console UI ===
+
+Query: Triage data-subject request DSR-1042 and check its marketing consent
+
+[Thinking...]
+  Planning to call: fetch_record
+[Running] fetch_record... Done (505ms)
+[Thinking...]
+  Planning to call: check_consent
+[Running] check_consent... Done (0ms)
+[Thinking...]
+
+[Complete] complete
+
+Verdict: The data-subject request DSR-1042 pertains to jane.doe@example.com and involves a "marketing profile" data category. Consent for this category was withdrawn 9 days ago, and the retention basis has expired. This indicates there is no longer valid consent to retain or process this data.
+
+...
+
+=== Part 4: Collecting Metrics ===
+
+Execution Metrics:
+  Think events:    3
+  Tool starts:     2
+  Tool completes:  2
+  Tool time:       0.3ms
+  Iterations:      3
+  Total time:      3927.1ms
+
+=== Part 5: Progress Tracking ===
+
+Processing pending queue...
+  [###-------] 33% - fetch_records complete
+  [######----] 67% - scan_records complete
+  [##########] 100% - file_report complete
+
+Done! Final message: Fetch, scan, and reporting on the pending queue is complete:
+
+- 3 requests were processed (DSR-1042, DSR-1043, DSR-1044).
+- Total data scanned: 226 bytes.
+- Case file checksum: sha256:a295d7e9db89.
+- Triage report has been successfully filed.
+
+Let me know if you need details on any specific request or further actions!
+
+=== Part 6: Token-level streaming ===
+
+Streaming the reply as it is generated:
+
+
+  [tool: extract_pii]
+  Analysis:
+- The record contains an email address: jane.doe@example.com.
+- The text also references a phone number (555-0142).
+
+Both the email address and the phone number are types of personally identifiable information (PII) and should be handled according to data privacy regulations.
+
+  stop reason: complete
+  chain-of-thought streamed separately: 0 chars
+
+...
+
+============================================================
+Next: Notebook 07 — Structured output: typed support schemas a help desk can consume
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_06_agent_streaming.py`"

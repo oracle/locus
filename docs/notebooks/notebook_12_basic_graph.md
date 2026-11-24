@@ -89,6 +89,85 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_12_basic_graph.py
 - [Conditional routing](notebook_13_conditional_routing.md) — the
   `add_conditional_edges` router the diagram shows (Notebook 13).
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints a one-node graph around a model call, a three-node sequence, the keys each node receives as state accumulates, a fan-out whose branches run concurrently, the fields of `GraphResult`, the `CUSTOM` and `UPDATE` events of a streamed run, and an agent called inside a node; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: A one-node graph ===
+
+  [model call: 2.29s · 49→39 tokens]
+Input:   subject = 'Please delete all data you hold about me'
+Output:  assessment = 'This message is a clear data erasure request (right to be forgotten) under data protection laws such as GDPR and should be promptly forwarded to the appropriate privacy or compliance team for verification and processing.'
+Success: True
+
+=== Part 2: A sequence of nodes — parse → enrich → verdict ===
+
+  [model call: 1.10s · 42→14 tokens]
+Input:    request = '  please export my health record and contact details  '
+Parsed:   has_content = True
+Enriched: mentions_special_category = True
+Verdict:  8 tokens, special_category=True — Priority triage: expedite due to mention of special-category personal data.
+
+=== Part 3: How state accumulates ===
+
+Executing graph...
+  Intake receives:    ['request_id']
+  Correlate receives: ['request_id', 'intake_note', 'exposure_score', '_node_intake']
+  Score receives:     ['request_id', 'intake_note', 'exposure_score', '_node_intake', 'correlate_note', 'combined_exposure', '_node_correlate']
+
+Final state:
+  request_id: DSAR-1042
+  intake_note: request ingested
+  exposure_score: 10
+  correlate_note: matched a sibling request
+  combined_exposure: 20
+  score_note: final score issued
+  final_exposure: 25
+
+=== Part 4: Fan-out and fan-in ===
+
+  [model call: 0.91s · 64→1 tokens]
+Input: 'subject id:8842 email jordan@example.com phone +1-555-0100'
+Enrichment: {'sensitivity': 'high', 'identifiers': 2, 'consent': 'withdrawn-no-active-basis'}
+Time: 909ms (parallel nodes run concurrently)
+
+=== Part 5: Reading GraphResult ===
+
+GraphResult fields:
+  .success         = True
+  .graph_id        = graph_6b3694e9
+  .duration_ms     = 0.0
+  .iterations      = 1
+  .execution_order = ['normalize']
+
+  .final_state:
+    raw_score: 21
+    normalized: True
+    exposure_score: 42
+
+  .node_results:
+    normalize: status=completed
+
+=== Part 6: Streaming with emit_custom ===
+
+Streaming UPDATES + CUSTOM events as they arrive:
+  [CUSTOM]  None: {'phase': 'starting', 'record_count': 21}
+  [CUSTOM]  None: {'phase': 'halfway', 'matched_so_far': 42}
+  [UPDATE]  enrich: {'matched_records': 42}
+  [UPDATE]  report: {'report_entries': 52}
+
+=== Part 7: An Agent inside a node ===
+
+  [model call: 1.03s · 45→22 tokens]
+AI summary: We process and analyze email open data by linking it to individual CRM profiles to evaluate and optimize marketing campaign effectiveness.
+
+============================================================
+Next: Notebook 13 — Routing requests by privacy risk
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_12_basic_graph.py`"
