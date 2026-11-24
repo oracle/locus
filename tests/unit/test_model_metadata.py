@@ -257,6 +257,26 @@ class TestModelIdOf:
 
         assert model_id_of(_Model("gpt-4o")) == "gpt-4o"
 
+    def test_oci_sdk_transport_names_its_model_in_config_model_id(self) -> None:
+        from types import SimpleNamespace
+
+        from locus.models.metadata import model_id_of
+
+        # OCIConfig keeps ``model`` empty and names the model in ``model_id``.
+        model = SimpleNamespace(config=SimpleNamespace(model="", model_id="openai.gpt-4.1"))
+        assert model_id_of(model) == "openai.gpt-4.1"
+        md = metadata_for("openai.gpt-4.1")
+        assert md is not None
+        assert md.context_length
+
+    def test_config_model_wins_over_config_model_id(self) -> None:
+        from types import SimpleNamespace
+
+        from locus.models.metadata import model_id_of
+
+        model = SimpleNamespace(config=SimpleNamespace(model="gpt-4o", model_id="other"))
+        assert model_id_of(model) == "gpt-4o"
+
     def test_bare_model_attribute(self) -> None:
         from types import SimpleNamespace
 

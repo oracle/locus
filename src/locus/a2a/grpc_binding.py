@@ -232,19 +232,34 @@ class A2AGrpcService:
         _, response_name, _ = RPC_SIGNATURES[method]
 
         async def handler(request: Any, context: Any) -> Any:
+            # Lazy import — observability is opt-in.
+            from locus.observability.emit import EV_A2A_TASK_RECEIVED, emit  # noqa: PLC0415
+
             await self._guard(context)
             params = self._messages.to_dict(request)
-            try:
-                # A ``traceparent`` metadata entry puts the run under the caller's trace.
-                with trace_scope(self._metadata(context)):
+            # A ``traceparent`` metadata entry puts the run under the caller's trace.
+            with trace_scope(self._metadata(context)):
+                # The same bracket the HTTP bindings publish; gRPC has no
+                # request id, so ``rpc_id`` is null.
+                await emit(EV_A2A_TASK_RECEIVED, method=method, rpc_id=None)
+                completed = self._server.completion_emitter(method, time.perf_counter())
+                # ``None`` until the call ends on its own; a cancelled call
+                # reports ``success`` false with no error code.
+                outcome: tuple[bool, int | None] | None = None
+                try:
                     result = await self._server.handle_v1(method, params)
-            except A2AV1ProtocolError as e:
-                await self._abort(context, e.code, e.message)
-                raise  # pragma: no cover - abort raises
-            except Exception:
-                _logger.exception("A2A gRPC %s failed", method)
-                await self._abort(context, INTERNAL_ERROR, "internal error")
-                raise  # pragma: no cover - abort raises
+                    outcome = (True, None)
+                except A2AV1ProtocolError as e:
+                    outcome = (False, e.code)
+                    await self._abort(context, e.code, e.message)
+                    raise  # pragma: no cover - abort raises
+                except Exception:
+                    outcome = (False, INTERNAL_ERROR)
+                    _logger.exception("A2A gRPC %s failed", method)
+                    await self._abort(context, INTERNAL_ERROR, "internal error")
+                    raise  # pragma: no cover - abort raises
+                finally:
+                    completed(*(outcome if outcome is not None else (False, None)))
             return self._messages.from_dict(result, response_name)
 
         return handler
@@ -253,17 +268,29 @@ class A2AGrpcService:
         _, response_name, _ = RPC_SIGNATURES[method]
 
         async def handler(request: Any, context: Any) -> AsyncIterator[Any]:
+            # Lazy import — observability is opt-in.
+            from locus.observability.emit import EV_A2A_TASK_RECEIVED, emit  # noqa: PLC0415
+
             await self._guard(context)
             params = self._messages.to_dict(request)
-            try:
-                with trace_scope(self._metadata(context)):
+            with trace_scope(self._metadata(context)):
+                await emit(EV_A2A_TASK_RECEIVED, method=method, rpc_id=None)
+                completed = self._server.completion_emitter(method, time.perf_counter())
+                # ``None`` when the client cancels before the stream ends.
+                outcome: tuple[bool, int | None] | None = None
+                try:
                     async for frame in self._server.handle_v1_stream(method, params):
                         yield self._messages.from_dict(frame, response_name)
-            except A2AV1ProtocolError as e:
-                await self._abort(context, e.code, e.message)
-            except Exception:
-                _logger.exception("A2A gRPC %s stream failed", method)
-                await self._abort(context, INTERNAL_ERROR, "internal error")
+                    outcome = (True, None)
+                except A2AV1ProtocolError as e:
+                    outcome = (False, e.code)
+                    await self._abort(context, e.code, e.message)
+                except Exception:
+                    outcome = (False, INTERNAL_ERROR)
+                    _logger.exception("A2A gRPC %s stream failed", method)
+                    await self._abort(context, INTERNAL_ERROR, "internal error")
+                finally:
+                    completed(*(outcome if outcome is not None else (False, None)))
 
         return handler
 
@@ -480,6 +507,9 @@ class GrpcClientTransport(ClientTransport):
             frames += 1
             yield {"error": {"code": translated.code, "message": translated.message}}
         finally:
+            # A consumer that stops reading early leaves the RPC open; cancel
+            # it so the server stops producing. A finished call ignores this.
+            call.cancel()
             data: dict[str, Any] = {
                 "target_url": self.url,
                 "method": method,
