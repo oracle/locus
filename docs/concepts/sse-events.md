@@ -191,7 +191,7 @@ returns. Like every `emit()` site, a no-op without a bound run id.
 
 | Event | Payload |
 |---|---|
-| `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`) |
+| `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`; the HTTP+JSON routes report the A2A 1.0 operation name, such as `SendMessage`, and a null `rpc_id`) |
 | `a2a.task.processing` | `task_id`, `context_id`, `resumed` (true when the task continues after an interrupt) |
 | `a2a.task.completed` | `method`, `success`, `error_code` (on a protocol or internal error; absent when a streaming client left mid-stream), `duration_ms` |
 | `a2a.client.send` | `target_url`, `method`, `binding` (from the v1 transports) |

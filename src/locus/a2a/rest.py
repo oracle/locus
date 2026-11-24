@@ -33,8 +33,9 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from typing import TYPE_CHECKING, Any
 
 # ``Request`` must be a module-level name: with postponed annotations FastAPI
@@ -121,40 +122,93 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
     async def unary(
         method: str, params: dict[str, Any], version: str | None, request: Request
     ) -> JSONResponse:
-        try:
-            check_version(version)
-            # Run under the caller's trace, if its headers carry one.
-            with trace_scope(request.headers):
-                return ok(await server.handle_v1(method, params))
-        except A2AV1ProtocolError as e:
-            return error_response(e.code, e.message)
-        except Exception:
-            correlation_id = uuid.uuid4().hex
-            _logger.exception("A2A HTTP+JSON %s failed (correlation_id=%s)", method, correlation_id)
-            return error_response(
-                INTERNAL_ERROR, f"internal error (correlation_id={correlation_id})"
-            )
+        # Lazy import — observability is opt-in.
+        from locus.observability.emit import (  # noqa: PLC0415
+            EV_A2A_TASK_COMPLETED,
+            EV_A2A_TASK_RECEIVED,
+            emit,
+        )
 
-    def sse(method: str, params: dict[str, Any], version: str | None, request: Request) -> Any:
+        # Run under the caller's trace, if its headers carry one.
+        with trace_scope(request.headers):
+            # The same bracket the JSON-RPC binding publishes; this binding
+            # has no request id, so ``rpc_id`` is null.
+            await emit(EV_A2A_TASK_RECEIVED, method=method, rpc_id=None)
+            started = time.perf_counter()
+            # ``None`` until the request ends on its own; a cancelled request
+            # reports ``success`` false with no error code.
+            outcome: tuple[bool, int | None] | None = None
+            try:
+                check_version(version)
+                response = ok(await server.handle_v1(method, params))
+                outcome = (True, None)
+                return response
+            except A2AV1ProtocolError as e:
+                outcome = (False, e.code)
+                return error_response(e.code, e.message)
+            except Exception:
+                outcome = (False, INTERNAL_ERROR)
+                correlation_id = uuid.uuid4().hex
+                _logger.exception(
+                    "A2A HTTP+JSON %s failed (correlation_id=%s)", method, correlation_id
+                )
+                return error_response(
+                    INTERNAL_ERROR, f"internal error (correlation_id={correlation_id})"
+                )
+            finally:
+                success, error_code = outcome if outcome is not None else (False, None)
+                data: dict[str, Any] = {
+                    "method": method,
+                    "success": success,
+                    "duration_ms": (time.perf_counter() - started) * 1000,
+                }
+                if error_code is not None:
+                    data["error_code"] = error_code
+                await emit(EV_A2A_TASK_COMPLETED, **data)
+
+    async def sse(
+        method: str, params: dict[str, Any], version: str | None, request: Request
+    ) -> Any:
+        # Lazy import — observability is opt-in.
+        from locus.observability.emit import EV_A2A_TASK_RECEIVED, emit  # noqa: PLC0415
+
         carrier = dict(request.headers)
+        with trace_scope(carrier):
+            await emit(EV_A2A_TASK_RECEIVED, method=method, rpc_id=None)
+            # The handler returns the response before the stream runs, so the
+            # stream publishes ``a2a.task.completed`` when its generator ends,
+            # in the context ``received`` was emitted under.
+            completed = server.completion_emitter(method, time.perf_counter())
 
         async def gen() -> AsyncIterator[str]:
             # The generator runs after the handler returned, so the caller's
             # trace is re-attached here for the run it drives.
             with trace_scope(carrier):
-                async for chunk in produce():
-                    yield chunk
+                stream = produce()
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    # Closed here, not by the loop's finaliser, so the
+                    # completion lands as soon as the response ends.
+                    await stream.aclose()
 
-        async def produce() -> AsyncIterator[str]:
+        async def produce() -> AsyncGenerator[str, None]:
+            # ``None`` until the stream ends on its own; a client that goes
+            # away mid-stream closes the generator before it is set.
+            outcome: tuple[bool, int | None] | None = None
             try:
                 check_version(version)
                 async for frame in server.handle_v1_stream(method, params):
                     yield f"data: {json.dumps(frame)}\n\n"
+                outcome = (True, None)
             except A2AV1ProtocolError as e:
+                outcome = (False, e.code)
                 # An ``error`` event, as the specification's reference client
                 # expects for a failure inside a stream.
                 yield f"event: error\ndata: {json.dumps(http_error_body(e.code, e.message))}\n\n"
             except Exception:
+                outcome = (False, INTERNAL_ERROR)
                 correlation_id = uuid.uuid4().hex
                 _logger.exception(
                     "A2A HTTP+JSON %s stream failed (correlation_id=%s)", method, correlation_id
@@ -168,6 +222,9 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
                     )
                     + "\n\n"
                 )
+            finally:
+                success, error_code = outcome if outcome is not None else (False, None)
+                completed(success, error_code)
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -196,7 +253,7 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
             params = await body_of(request)
         except A2AV1ProtocolError as e:
             return error_response(e.code, e.message)
-        return sse("SendStreamingMessage", params, a2a_version, request)
+        return await sse("SendStreamingMessage", params, a2a_version, request)
 
     @app.post("/tasks/{task_id}:cancel")
     async def rest_cancel_task(
@@ -220,7 +277,7 @@ def mount_http_json(app: FastAPI, server: A2AServer, auth_dep: Any) -> None:
         a2a_version: str | None = Header(default=None, alias=A2A_VERSION_HEADER),
         _: str = auth_dep,
     ) -> Any:
-        return sse("SubscribeToTask", {"id": task_id}, a2a_version, request)
+        return await sse("SubscribeToTask", {"id": task_id}, a2a_version, request)
 
     @app.post("/tasks/{task_id}/pushNotificationConfigs")
     async def rest_create_push_config(

@@ -116,12 +116,14 @@ def run_notebook(stem: str, sdk: Path) -> str:
         text=True,
         timeout=300,
         cwd=script.parent.parent,
-        # No provider set: the notebooks fall back to the bundled mock, which
-        # is what makes this reproducible and keyless.
+        # The bundled mock, named outright: it is what makes this reproducible
+        # and keyless, and without it a machine whose home directory holds a
+        # usable OCI profile would send every notebook to a live model.
         env={
             "PATH": os.environ.get("PATH", ""),
             "HOME": os.environ.get("HOME", ""),
             "PYTHONPATH": str(sdk / "src"),
+            "LOCUS_MODEL_PROVIDER": "mock",
         },
         check=False,
     )

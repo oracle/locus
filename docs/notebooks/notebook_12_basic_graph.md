@@ -152,8 +152,8 @@ GraphResult fields:
 === Part 6: Streaming with emit_custom ===
 
 Streaming UPDATES + CUSTOM events as they arrive:
-  [CUSTOM]  None: {'phase': 'starting', 'record_count': 21}
-  [CUSTOM]  None: {'phase': 'halfway', 'matched_so_far': 42}
+  [CUSTOM]  enrich: {'phase': 'starting', 'record_count': 21}
+  [CUSTOM]  enrich: {'phase': 'halfway', 'matched_so_far': 42}
   [UPDATE]  enrich: {'matched_records': 42}
   [UPDATE]  report: {'report_entries': 52}
 

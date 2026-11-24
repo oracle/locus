@@ -1387,7 +1387,7 @@ class A2AServer(A2AV1ServerMixin):
             JsonRpcSuccessResponse(id=req.id, result=result).model_dump(exclude_none=True)
         )
 
-    def _stream_completion(self, method: str, started: float) -> Callable[[bool, int | None], None]:
+    def completion_emitter(self, method: str, started: float) -> Callable[[bool, int | None], None]:
         """A callable that publishes ``a2a.task.completed`` for a streaming response.
 
         The generator may be finalised by the event loop in another context
@@ -1442,7 +1442,7 @@ class A2AServer(A2AV1ServerMixin):
 
         params = req.params if isinstance(req.params, dict) else {}
         _started = _time.perf_counter() if started is None else started
-        completed = self._stream_completion(req.method, _started)
+        completed = self.completion_emitter(req.method, _started)
 
         async def gen() -> AsyncIterator[str]:
             # The generator runs after the handler returned, so the caller's
@@ -1508,7 +1508,7 @@ class A2AServer(A2AV1ServerMixin):
         from locus.observability.emit import EV_A2A_TASK_RECEIVED, emit  # noqa: PLC0415
 
         await emit(EV_A2A_TASK_RECEIVED, method="a2a/stream", rpc_id=None)
-        completed = self._stream_completion("a2a/stream", _time.perf_counter())
+        completed = self.completion_emitter("a2a/stream", _time.perf_counter())
 
         user_msgs = [m for m in request.messages if m.role == "user"]
         prompt = user_msgs[-1].content if user_msgs else ""

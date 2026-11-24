@@ -50,9 +50,9 @@ async for event in graph.stream(order, mode=StreamMode.UPDATES):
         ui.mark_node_complete(event.node_id)         # specialist done deciding
 ```
 
-`emit_custom` is exported from `locus.multiagent` and accepts an
-optional `node_id=` kwarg if you want the event tagged with the
-emitting specialist's identity.
+`emit_custom` is exported from `locus.multiagent`. The event's `node_id`
+is the node the call runs in; pass `node_id=` to tag it with another
+identity.
 
 ## Real-time delivery
 

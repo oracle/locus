@@ -78,6 +78,24 @@ policy.
 
 ### Fixed
 
+- **The A2A HTTP+JSON binding publishes `a2a.task.received` and
+  `a2a.task.completed`.** Requests served on the HTTP+JSON routes
+  (`POST /message:send`, `POST /message:stream`, `GET /tasks/{id}` and the
+  rest) ran without the bracket the JSON-RPC binding publishes, so a
+  subscriber saw `a2a.task.processing` for them and nothing around it. Each
+  route now emits `received` with the A2A 1.0 operation name and a null
+  `rpc_id`, and `completed` with `success`, `duration_ms` and the
+  `error_code` of a protocol or internal error; a streaming route publishes
+  `completed` after its last frame.
+- **`emit_custom` names the node it runs in.** A `CUSTOM` stream event
+  emitted from a node body without `node_id` carried `node_id=None`, so a
+  consumer of `StateGraph.stream()` could not tell which node reported the
+  progress. The event now carries the id of the emitting node; an explicit
+  `node_id=` still wins.
+- `scripts/notebook_output.py` runs the notebooks with the mock provider
+  named outright. It relied on no provider being set, so on a machine whose
+  home directory holds a usable OCI profile the check sent every notebook
+  to a live model.
 - **`SummarizingManager.apply()` calls a synchronous `summarize_fn`.** The
   synchronous path skipped any `summarize_fn` and wrote the placeholder
   "Conversation with N messages summarized." as the summary, so a thread
