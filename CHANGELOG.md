@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.6.0] - 2026-11-24
+
 ### Added
 
 - **Difficulty measured from outcomes for the router corpus.**
