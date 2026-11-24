@@ -69,6 +69,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "BENCHMARK_CAPABILITIES",
+    "DIFFICULTIES",
+    "DIFFICULTY_TAG_PREFIX",
     "GOAL_TAG_PREFIX",
     "REFUSED",
     "SHAPE_TAG_PREFIX",
@@ -160,6 +162,11 @@ TAG_AMBIGUOUS = "ambiguous"
 TAG_TRAP = "trap"
 SHAPE_TAG_PREFIX = "shape:"
 GOAL_TAG_PREFIX = "goal:"
+#: The difficulty a labelled case's author intends: ``difficulty:low``,
+#: ``difficulty:medium`` or ``difficulty:high``.
+DIFFICULTY_TAG_PREFIX = "difficulty:"
+#: The difficulty levels, in the order the table prints them.
+DIFFICULTIES: tuple[str, ...] = ("low", "medium", "high")
 
 #: The capability ids the corpus names; :func:`benchmark_capabilities` provides them.
 BENCHMARK_CAPABILITIES: tuple[str, ...] = ("kb_search", "metric_probe", "alert_list")
@@ -201,7 +208,9 @@ def load_router_corpus(
     A ``labelled`` case carries exactly one ``shape:<id>`` tag naming a
     registered protocol, and ``expected_output_contains`` is that id alone,
     so a reading passes only when the target answered with the protocol
-    the label names. A ``trap`` is labelled with a low-cost shape: its verb
+    the label names. It also carries exactly one ``difficulty:<level>`` tag,
+    the difficulty its author intends, so a report splits by difficulty. A
+    ``trap`` is labelled with a low-cost shape and low difficulty: its verb
     points somewhere expensive, the work does not. An ``adversarial`` case
     carries ``injection`` or ``ambiguous`` and expects only that the answer
     is not :data:`UNBOUNDED`. Case names are unique, because reports diff by
@@ -235,8 +244,20 @@ def load_router_corpus(
                 raise ValueError(f"{where} names unregistered protocol {shapes[0]!r}")
             if case.expected_output_contains != [shape.id]:
                 raise ValueError(f"{where} must expect exactly [{shape.id!r}]")
+            levels = [
+                t[len(DIFFICULTY_TAG_PREFIX) :]
+                for t in case.tags
+                if t.startswith(DIFFICULTY_TAG_PREFIX)
+            ]
+            if len(levels) != 1 or levels[0] not in DIFFICULTIES:
+                raise ValueError(
+                    f"{where} needs exactly one {DIFFICULTY_TAG_PREFIX}<level> tag, "
+                    f"one of {', '.join(DIFFICULTIES)}"
+                )
             if TAG_TRAP in tags and shape.cost != "low":
                 raise ValueError(f"{where} is a trap, so its shape must be low-cost")
+            if TAG_TRAP in tags and levels[0] != "low":
+                raise ValueError(f"{where} is a trap, so its difficulty must be low")
         elif TAG_ADVERSARIAL in tags:
             flavours = tags & {TAG_INJECTION, TAG_AMBIGUOUS}
             if len(flavours) != 1:
@@ -651,12 +672,13 @@ def tag_table(reports: Mapping[str, EvalReport], cases: Sequence[EvalCase]) -> s
     Each cell is ``strict (mean)``: the share of cases every reading got
     right, and the share of readings that were right. ``all`` is the whole
     corpus; the other rows are the corpus's tags in a fixed order, then the
-    ``shape:`` and ``goal:`` tags.
+    ``difficulty:``, ``shape:`` and ``goal:`` tags.
     """
     names = list(reports)
     fixed = [TAG_LABELLED, TAG_TRAP, TAG_ADVERSARIAL, TAG_INJECTION, TAG_AMBIGUOUS]
     present = {t for c in cases for t in c.tags}
     rows = [t for t in fixed if t in present]
+    rows += [t for t in (DIFFICULTY_TAG_PREFIX + level for level in DIFFICULTIES) if t in present]
     rows += sorted(t for t in present if t.startswith(SHAPE_TAG_PREFIX))
     rows += sorted(t for t in present if t.startswith(GOAL_TAG_PREFIX))
 

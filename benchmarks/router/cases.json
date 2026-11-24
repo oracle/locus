@@ -5,14 +5,17 @@
     "tags": [
       "labelled",
       "shape:direct_response",
-      "goal:answer"
+      "goal:answer",
+      "difficulty:low"
     ],
     "expected_output_contains": [
       "direct_response"
     ],
     "metadata": {
       "expected_goal": "answer",
-      "domain": "research"
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -21,14 +24,17 @@
     "tags": [
       "labelled",
       "shape:direct_response",
-      "goal:answer"
+      "goal:answer",
+      "difficulty:low"
     ],
     "expected_output_contains": [
       "direct_response"
     ],
     "metadata": {
       "expected_goal": "answer",
-      "domain": "research"
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -37,14 +43,17 @@
     "tags": [
       "labelled",
       "shape:direct_response",
-      "goal:answer"
+      "goal:answer",
+      "difficulty:low"
     ],
     "expected_output_contains": [
       "direct_response"
     ],
     "metadata": {
       "expected_goal": "answer",
-      "domain": "research"
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -53,14 +62,17 @@
     "tags": [
       "labelled",
       "shape:direct_response",
-      "goal:explain"
+      "goal:explain",
+      "difficulty:low"
     ],
     "expected_output_contains": [
       "direct_response"
     ],
     "metadata": {
       "expected_goal": "explain",
-      "domain": "research"
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -69,14 +81,17 @@
     "tags": [
       "labelled",
       "shape:direct_response",
-      "goal:explain"
+      "goal:explain",
+      "difficulty:low"
     ],
     "expected_output_contains": [
       "direct_response"
     ],
     "metadata": {
       "expected_goal": "explain",
-      "domain": "research"
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -85,14 +100,17 @@
     "tags": [
       "labelled",
       "shape:direct_response",
-      "goal:explain"
+      "goal:explain",
+      "difficulty:low"
     ],
     "expected_output_contains": [
       "direct_response"
     ],
     "metadata": {
       "expected_goal": "explain",
-      "domain": "research"
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -101,14 +119,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:plan"
+      "goal:plan",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "plan",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -117,14 +138,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:plan"
+      "goal:plan",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "plan",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -133,14 +157,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:plan"
+      "goal:plan",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "plan",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -149,14 +176,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:build"
+      "goal:build",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "build",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -165,14 +195,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:build"
+      "goal:build",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "build",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -181,14 +214,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:build"
+      "goal:build",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "build",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -197,14 +233,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:modify"
+      "goal:modify",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "modify",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -213,14 +252,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:modify"
+      "goal:modify",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "modify",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -229,14 +271,17 @@
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
-      "goal:modify"
+      "goal:modify",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "plan_execute_validate"
     ],
     "metadata": {
       "expected_goal": "modify",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -245,14 +290,17 @@
     "tags": [
       "labelled",
       "shape:codegen_test_validate",
-      "goal:generate_code"
+      "goal:generate_code",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "codegen_test_validate"
     ],
     "metadata": {
       "expected_goal": "generate_code",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -261,14 +309,17 @@
     "tags": [
       "labelled",
       "shape:codegen_test_validate",
-      "goal:generate_code"
+      "goal:generate_code",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "codegen_test_validate"
     ],
     "metadata": {
       "expected_goal": "generate_code",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -277,14 +328,17 @@
     "tags": [
       "labelled",
       "shape:codegen_test_validate",
-      "goal:generate_code"
+      "goal:generate_code",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "codegen_test_validate"
     ],
     "metadata": {
       "expected_goal": "generate_code",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -293,14 +347,17 @@
     "tags": [
       "labelled",
       "shape:codegen_test_validate",
-      "goal:generate_code"
+      "goal:generate_code",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "codegen_test_validate"
     ],
     "metadata": {
       "expected_goal": "generate_code",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -309,14 +366,17 @@
     "tags": [
       "labelled",
       "shape:codegen_test_validate",
-      "goal:generate_code"
+      "goal:generate_code",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "codegen_test_validate"
     ],
     "metadata": {
       "expected_goal": "generate_code",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -325,14 +385,17 @@
     "tags": [
       "labelled",
       "shape:codegen_test_validate",
-      "goal:generate_code"
+      "goal:generate_code",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "codegen_test_validate"
     ],
     "metadata": {
       "expected_goal": "generate_code",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -341,7 +404,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:diagnose"
+      "goal:diagnose",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -352,7 +416,9 @@
       "capabilities": [
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -361,7 +427,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:diagnose"
+      "goal:diagnose",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -372,7 +439,9 @@
       "capabilities": [
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -381,7 +450,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:diagnose"
+      "goal:diagnose",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -392,7 +462,9 @@
       "capabilities": [
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -401,7 +473,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:monitor"
+      "goal:monitor",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -412,7 +485,9 @@
       "capabilities": [
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -421,7 +496,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:monitor"
+      "goal:monitor",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -432,7 +508,9 @@
       "capabilities": [
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -441,7 +519,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:monitor"
+      "goal:monitor",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -452,7 +531,9 @@
       "capabilities": [
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -461,7 +542,8 @@
     "tags": [
       "labelled",
       "shape:specialist_fanout",
-      "goal:research"
+      "goal:research",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "specialist_fanout"
@@ -473,7 +555,9 @@
         "kb_search",
         "metric_probe",
         "alert_list"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -482,14 +566,17 @@
     "tags": [
       "labelled",
       "shape:debate",
-      "goal:compare"
+      "goal:compare",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "debate"
     ],
     "metadata": {
       "expected_goal": "compare",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -498,14 +585,17 @@
     "tags": [
       "labelled",
       "shape:debate",
-      "goal:compare"
+      "goal:compare",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "debate"
     ],
     "metadata": {
       "expected_goal": "compare",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -514,14 +604,17 @@
     "tags": [
       "labelled",
       "shape:debate",
-      "goal:compare"
+      "goal:compare",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "debate"
     ],
     "metadata": {
       "expected_goal": "compare",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -530,14 +623,17 @@
     "tags": [
       "labelled",
       "shape:debate",
-      "goal:compare"
+      "goal:compare",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "debate"
     ],
     "metadata": {
       "expected_goal": "compare",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -546,14 +642,17 @@
     "tags": [
       "labelled",
       "shape:debate",
-      "goal:compare"
+      "goal:compare",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "debate"
     ],
     "metadata": {
       "expected_goal": "compare",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -562,14 +661,17 @@
     "tags": [
       "labelled",
       "shape:debate",
-      "goal:compare"
+      "goal:compare",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "debate"
     ],
     "metadata": {
       "expected_goal": "compare",
-      "domain": "engineering"
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -578,14 +680,17 @@
     "tags": [
       "labelled",
       "shape:approval_gated_execution",
-      "goal:remediate"
+      "goal:remediate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "approval_gated_execution"
     ],
     "metadata": {
       "expected_goal": "remediate",
-      "domain": "ops"
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
     }
   },
   {
@@ -594,14 +699,17 @@
     "tags": [
       "labelled",
       "shape:approval_gated_execution",
-      "goal:remediate"
+      "goal:remediate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "approval_gated_execution"
     ],
     "metadata": {
       "expected_goal": "remediate",
-      "domain": "ops"
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
     }
   },
   {
@@ -610,14 +718,17 @@
     "tags": [
       "labelled",
       "shape:approval_gated_execution",
-      "goal:remediate"
+      "goal:remediate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "approval_gated_execution"
     ],
     "metadata": {
       "expected_goal": "remediate",
-      "domain": "ops"
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
     }
   },
   {
@@ -626,14 +737,17 @@
     "tags": [
       "labelled",
       "shape:approval_gated_execution",
-      "goal:escalate"
+      "goal:escalate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "approval_gated_execution"
     ],
     "metadata": {
       "expected_goal": "escalate",
-      "domain": "ops"
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
     }
   },
   {
@@ -642,14 +756,17 @@
     "tags": [
       "labelled",
       "shape:approval_gated_execution",
-      "goal:escalate"
+      "goal:escalate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "approval_gated_execution"
     ],
     "metadata": {
       "expected_goal": "escalate",
-      "domain": "ops"
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
     }
   },
   {
@@ -658,14 +775,17 @@
     "tags": [
       "labelled",
       "shape:approval_gated_execution",
-      "goal:escalate"
+      "goal:escalate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "approval_gated_execution"
     ],
     "metadata": {
       "expected_goal": "escalate",
-      "domain": "ops"
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
     }
   },
   {
@@ -674,7 +794,8 @@
     "tags": [
       "labelled",
       "shape:handoff_chain",
-      "goal:coordinate"
+      "goal:coordinate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "handoff_chain"
@@ -685,7 +806,9 @@
       "capabilities": [
         "alert_list",
         "metric_probe"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -694,7 +817,8 @@
     "tags": [
       "labelled",
       "shape:handoff_chain",
-      "goal:coordinate"
+      "goal:coordinate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "handoff_chain"
@@ -705,7 +829,9 @@
       "capabilities": [
         "kb_search",
         "metric_probe"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -714,7 +840,8 @@
     "tags": [
       "labelled",
       "shape:handoff_chain",
-      "goal:coordinate"
+      "goal:coordinate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "handoff_chain"
@@ -725,7 +852,9 @@
       "capabilities": [
         "alert_list",
         "metric_probe"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -734,7 +863,8 @@
     "tags": [
       "labelled",
       "shape:handoff_chain",
-      "goal:coordinate"
+      "goal:coordinate",
+      "difficulty:medium"
     ],
     "expected_output_contains": [
       "handoff_chain"
@@ -745,7 +875,9 @@
       "capabilities": [
         "kb_search",
         "metric_probe"
-      ]
+      ],
+      "expected_complexity": "medium",
+      "expected_risk": "low"
     }
   },
   {
@@ -755,6 +887,7 @@
       "labelled",
       "shape:direct_response",
       "goal:research",
+      "difficulty:low",
       "trap"
     ],
     "expected_output_contains": [
@@ -765,7 +898,9 @@
       "domain": "research",
       "capabilities": [
         "kb_search"
-      ]
+      ],
+      "expected_complexity": "low",
+      "expected_risk": "low"
     }
   },
   {
@@ -775,6 +910,7 @@
       "labelled",
       "shape:direct_response",
       "goal:research",
+      "difficulty:low",
       "trap"
     ],
     "expected_output_contains": [
@@ -785,6 +921,2721 @@
       "domain": "research",
       "capabilities": [
         "kb_search"
+      ],
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-04-what-does-http-status",
+    "prompt": "What does HTTP status 429 mean?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-05-what-port-does-postgresql",
+    "prompt": "What port does PostgreSQL listen on by default?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-06-who-maintains-the-kubernetes",
+    "prompt": "Who maintains the Kubernetes project?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-07-what-is-the-difference",
+    "prompt": "What is the difference between a process and a thread?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-08-what-year-was-the",
+    "prompt": "What year was the TLS 1.3 specification published?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-09-what-happens-to-in",
+    "prompt": "What happens to in-flight requests when a Kubernetes pod receives SIGTERM?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-10-which-isolation-level-does",
+    "prompt": "Which isolation level does PostgreSQL use by default, and what anomaly does it still allow?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-11-what-is-the-worst",
+    "prompt": "What is the worst-case time complexity of quicksort, and when does it occur?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-12-what-are-the-four",
+    "prompt": "What are the four necessary conditions for a deadlock, and which one does lock ordering remove?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "answer-13-what-quorum-size-does",
+    "prompt": "What quorum size does a five-node Raft cluster need, and how many failures does it tolerate?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:answer",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "answer",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-04-explain-what-a-load",
+    "prompt": "Explain what a load balancer does.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-05-explain-the-difference-between",
+    "prompt": "Explain the difference between authentication and authorization.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-06-summarise-what-a-vector",
+    "prompt": "Summarise what a vector database is for.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-07-explain-what-idempotency-means",
+    "prompt": "Explain what idempotency means for an HTTP API.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-08-describe-in-one-paragraph",
+    "prompt": "Describe in one paragraph what a circuit breaker does.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-09-explain-how-a-write",
+    "prompt": "Explain how a write-ahead log lets a database recover after a crash.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-10-explain-why-adding-an",
+    "prompt": "Explain why adding an index can slow down writes.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-11-walk-me-through-how",
+    "prompt": "Walk me through how TLS establishes a shared key.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-12-explain-how-the-cap",
+    "prompt": "Explain how the CAP theorem constrains a multi-region database and what PACELC adds to it.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "explain-13-explain-why-exactly-once",
+    "prompt": "Explain why exactly-once delivery is hard and how idempotent consumers approximate it.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:explain",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "explain",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-04-plan-a-one-line",
+    "prompt": "Plan a one-line commit message for a typo fix in the README.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:plan",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-05-plan-which-http-status",
+    "prompt": "Plan which HTTP status code our health endpoint should return when it is healthy.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:plan",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-06-draft-a-plan-in",
+    "prompt": "Draft a plan in one sentence: should lint run before or after unit tests?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:plan",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-07-plan-the-migration-of",
+    "prompt": "Plan the migration of our cron jobs to a managed scheduler, with a check that every job ran once after cutover.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-08-plan-a-database-schema",
+    "prompt": "Plan a database schema change that adds a non-null column without downtime, and verify the backfill completed.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-09-lay-out-a-plan",
+    "prompt": "Lay out a plan to rotate every service's API keys this quarter, with a validation step per service.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-10-plan-the-deprecation-of",
+    "prompt": "Plan the deprecation of our v1 REST API: announcements, sunset headers, and a check that traffic reached zero.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-11-draw-up-a-plan",
+    "prompt": "Draw up a plan to move our test suite from one CI provider to another and confirm the runtimes match.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-12-plan-a-multi-region",
+    "prompt": "Plan a multi-region failover strategy for the orders database, including a rehearsal and success criteria for each stage.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-13-plan-the-decomposition-of",
+    "prompt": "Plan the decomposition of our monolith's billing module into a service over two quarters, with validation gates between phases.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "plan-14-plan-a-zero-downtime",
+    "prompt": "Plan a zero-downtime upgrade of our Kubernetes control plane across three clusters, validating workloads after each.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:plan",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "plan",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-04-build-a-regular-expression",
+    "prompt": "Build a regular expression that matches a five-digit ZIP code.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:build",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-05-build-the-cron-expression",
+    "prompt": "Build the cron expression for every weekday at 09:00.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:build",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-06-build-a-one-line",
+    "prompt": "Build a one-line shell command that counts the lines in a file.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:build",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-07-build-a-dockerfile-for",
+    "prompt": "Build a Dockerfile for a Python web service with a multi-stage build, and verify the image starts.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-08-build-a-json-schema",
+    "prompt": "Build a JSON Schema for our order events and validate three sample events against it.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-09-build-a-makefile-with",
+    "prompt": "Build a Makefile with lint, test and package targets, then check each target runs.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-10-build-a-terraform-module",
+    "prompt": "Build a Terraform module for an object storage bucket with versioning, and validate the plan output.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-11-build-a-ci-workflow",
+    "prompt": "Build a CI workflow that runs the tests on three Python versions and confirm the matrix expands correctly.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-12-build-a-data-pipeline",
+    "prompt": "Build a data pipeline that ingests CSV exports nightly, deduplicates them, loads a warehouse table and validates row counts end to end.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-13-build-an-internal-developer",
+    "prompt": "Build an internal developer portal skeleton: service catalogue, ownership metadata and a health page, with acceptance checks for each.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "build-14-build-a-feature-flag",
+    "prompt": "Build a feature-flag service with an admin API, a client SDK stub and a rollout rule engine, and validate each component against its contract.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-04-change-the-log-level",
+    "prompt": "Change the log level in this config line from INFO to DEBUG: `level = INFO`.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:modify",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-05-rename-the-variable-tmp",
+    "prompt": "Rename the variable `tmp` to `retry_count` in this line: `tmp = tmp + 1`.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:modify",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-06-update-this-sentence-to",
+    "prompt": "Update this sentence to British spelling: 'The color of the dialog was customized.'",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:modify",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-07-modify-our-pagination-to",
+    "prompt": "Modify our pagination to use cursors instead of offsets, and verify the existing clients still page correctly.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-08-update-the-build-configuration",
+    "prompt": "Update the build configuration to produce both a wheel and an sdist, then check both install cleanly.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-09-change-our-cache-keys",
+    "prompt": "Change our cache keys to include the tenant id and validate that no cross-tenant hits occur.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-10-refactor-the-notification-module",
+    "prompt": "Refactor the notification module to send through a queue instead of inline calls, and confirm delivery order is preserved.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-11-modify-the-api-client",
+    "prompt": "Modify the API client to retry on 503 with a capped backoff and verify the cap in a test run.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-12-modify-our-event-schema",
+    "prompt": "Modify our event schema from version 1 to version 2 across producers and consumers in stages, validating compatibility at each stage.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "modify-13-modify-the-production-firewall",
+    "prompt": "Modify the production firewall rules to open port 5432 to the analytics subnet.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "modify-14-change-the-retention-policy",
+    "prompt": "Change the retention policy on the production audit-log bucket from seven years to one year.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:modify",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "generate_code-07-write-a-python-one",
+    "prompt": "Write a Python one-liner that reverses a string.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:generate_code",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-08-generate-the-sql-to",
+    "prompt": "Generate the SQL to count the rows in the `orders` table.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:generate_code",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-09-write-a-javascript-expression",
+    "prompt": "Write a JavaScript expression that checks whether an array is empty.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:generate_code",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-10-write-a-python-function",
+    "prompt": "Write a Python function that parses an ISO 8601 duration into seconds, with pytest cases for weeks and fractional seconds.",
+    "tags": [
+      "labelled",
+      "shape:codegen_test_validate",
+      "goal:generate_code",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "codegen_test_validate"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-11-generate-a-java-method",
+    "prompt": "Generate a Java method that merges two sorted lists, with a JUnit test for empty inputs.",
+    "tags": [
+      "labelled",
+      "shape:codegen_test_validate",
+      "goal:generate_code",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "codegen_test_validate"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-12-write-a-bash-function",
+    "prompt": "Write a Bash function that retries a command up to five times with a delay, and a bats test for the failure path.",
+    "tags": [
+      "labelled",
+      "shape:codegen_test_validate",
+      "goal:generate_code",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "codegen_test_validate"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-13-generate-a-python-lru",
+    "prompt": "Generate a Python LRU cache class with a time-to-live per entry and thread safety, with tests for eviction order, expiry and concurrent access.",
+    "tags": [
+      "labelled",
+      "shape:codegen_test_validate",
+      "goal:generate_code",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "codegen_test_validate"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "generate_code-14-write-a-go-rate",
+    "prompt": "Write a Go rate limiter implementing a token bucket with burst, plus table-driven tests and a benchmark.",
+    "tags": [
+      "labelled",
+      "shape:codegen_test_validate",
+      "goal:generate_code",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "codegen_test_validate"
+    ],
+    "metadata": {
+      "expected_goal": "generate_code",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "diagnose-04-diagnose-this-error-message",
+    "prompt": "Diagnose this error message: `ModuleNotFoundError: No module named 'requests'`.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:diagnose",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "diagnose-05-find-out-why-this",
+    "prompt": "Find out why this command fails: `cd /nonexistent && ls`.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:diagnose",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "diagnose-06-diagnose-why-1-0",
+    "prompt": "Diagnose why `1 / 0` raises an exception in Python.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:diagnose",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "engineering",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "diagnose-07-diagnose-the-login-service",
+    "prompt": "Diagnose the login service's elevated error rate — check the active alerts and the errors_5xx metric and relate them.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-08-work-out-why-the",
+    "prompt": "Work out why the search service's latency doubled this morning: pull alerts and the latency_p99 metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-09-diagnose-the-queue-backlog",
+    "prompt": "Diagnose the queue backlog in the ingest pipeline — gather alerts and the queue_depth metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-10-find-the-cause-of",
+    "prompt": "Find the cause of the memory growth on the recommendations service using recent alerts and the memory_rss metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-11-diagnose-intermittent-timeouts-between",
+    "prompt": "Diagnose intermittent timeouts between the gateway and the orders service: correlate alerts with the upstream_timeout metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-12-diagnose-a-cascading-failure",
+    "prompt": "Diagnose a cascading failure across checkout, payments and inventory: pull alerts and the error and latency metrics for each service and build one timeline.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-13-diagnose-why-p99-latency",
+    "prompt": "Diagnose why p99 latency regressed after last night's release across four services, examining alerts, cpu, gc_pause and latency metrics independently before concluding.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "diagnose-14-root-cause-the-weekly",
+    "prompt": "Root-cause the weekly Monday-morning outage pattern: examine alerts, traffic, cpu and connection-pool metrics as separate lines of evidence.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:diagnose",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "diagnose",
+      "domain": "observability",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-04-monitor-this-single-reading",
+    "prompt": "Monitor this single reading and say whether it breaches the 500 ms threshold: latency_p99 = 430 ms.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:monitor",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "monitor-05-check-whether-this-value",
+    "prompt": "Check whether this value is within the error budget of 0.1%: error rate 0.04%.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:monitor",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "monitor-06-track-one-thing-for",
+    "prompt": "Track one thing for me: does `cpu = 97%` count as saturated under a 90% threshold?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:monitor",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "monitor-07-monitor-the-payments-service",
+    "prompt": "Monitor the payments service: list active alerts and report errors_5xx and latency_p99 together.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-08-watch-the-ingest-pipeline",
+    "prompt": "Watch the ingest pipeline — track queue_depth and throughput every two minutes and flag any alert.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-09-keep-an-eye-on",
+    "prompt": "Keep an eye on the database tier: report connection count and replication lag alongside any firing alerts.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-10-monitor-the-canary-deployment",
+    "prompt": "Monitor the canary deployment: compare its error rate and latency with the alerts raised since rollout began.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-11-track-disk-usage-and",
+    "prompt": "Track disk usage and inode usage on the logging cluster and list alerts as they appear.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-12-monitor-all-five-customer",
+    "prompt": "Monitor all five customer-facing services at once: for each, track cpu, latency_p99 and errors_5xx and list its alerts, then summarise by service.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-13-continuously-watch-the-regional",
+    "prompt": "Continuously watch the regional failover: track traffic share, error rate and latency per region and report every alert raised during the shift.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-14-monitor-the-batch-window",
+    "prompt": "Monitor the batch window overnight: follow job durations, queue depth, cpu and failures across the scheduler, workers and warehouse, with alerts.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "research-04-research-how-other-teams",
+    "prompt": "Research how other teams in our knowledge base handled cache stampedes and what the cache_miss metric shows for us.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "research-05-research-the-causes-of",
+    "prompt": "Research the causes of last quarter's checkout abandonment: knowledge-base articles and the conversion metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "research-06-look-into-how-our",
+    "prompt": "Look into how our rate-limit defaults were chosen: gather the design notes from the knowledge base and the throttle metric history.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "research-07-investigate-whether-connection-pooling",
+    "prompt": "Investigate whether connection pooling changes are documented and whether the pool_wait metric shows an effect.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "research-08-research-which-of-our",
+    "prompt": "Research which of our services still call the v1 API, using the knowledge base and the v1_requests metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "research-09-gather-what-we-know",
+    "prompt": "Gather what we know about cold-start latency from the knowledge base and from the startup_time metric.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "research-10-investigate-what-our-docs",
+    "prompt": "Investigate what our docs and recent alerts say about certificate expiry incidents, and what the cert_days_left metric reads.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "research-11-investigate-four-independent-explanations",
+    "prompt": "Investigate four independent explanations for the rise in support tickets: product changes in the knowledge base, error metrics, latency metrics and alert history.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "research-12-research-the-state-of",
+    "prompt": "Research the state of our disaster-recovery readiness from every angle: runbooks in the knowledge base, backup metrics, restore-test alerts and replication lag.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "research-13-conduct-a-broad-investigation",
+    "prompt": "Conduct a broad investigation into why infrastructure cost grew: knowledge-base decisions, usage metrics per service and capacity alerts, each examined separately.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "research-14-research-how-our-incident",
+    "prompt": "Research how our incident response has changed over the year, drawing separately on postmortems in the knowledge base, alert volumes and time-to-resolve metrics.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:research",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "research",
+      "domain": "research",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "compare-07-compare-3-and-7",
+    "prompt": "Compare 3 and 7: which is larger?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:compare",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-08-compare-a-kilometre-and",
+    "prompt": "Compare a kilometre and a mile: which is longer?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:compare",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-09-compare-these-two-strings",
+    "prompt": "Compare these two strings and say whether they are identical: 'abc' and 'abd'.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:compare",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "research",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-10-compare-kafka-vs-rabbitmq",
+    "prompt": "Compare Kafka vs RabbitMQ for an event-driven order pipeline.",
+    "tags": [
+      "labelled",
+      "shape:debate",
+      "goal:compare",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "debate"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-11-weigh-terraform-against-pulumi",
+    "prompt": "Weigh Terraform against Pulumi for a platform team of six.",
+    "tags": [
+      "labelled",
+      "shape:debate",
+      "goal:compare",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "debate"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-12-compare-optimistic-and-pessimistic",
+    "prompt": "Compare optimistic and pessimistic locking for an inventory service with frequent contention.",
+    "tags": [
+      "labelled",
+      "shape:debate",
+      "goal:compare",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "debate"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "engineering",
+      "expected_complexity": "medium",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-13-debate-whether-to-build",
+    "prompt": "Debate whether to build our own vector search or adopt a managed service, considering cost, latency, operations and lock-in.",
+    "tags": [
+      "labelled",
+      "shape:debate",
+      "goal:compare",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "debate"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "compare-14-argue-both-sides-of",
+    "prompt": "Argue both sides of moving the ledger from a relational model to an event-sourced one, and reach a recommendation.",
+    "tags": [
+      "labelled",
+      "shape:debate",
+      "goal:compare",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "debate"
+    ],
+    "metadata": {
+      "expected_goal": "compare",
+      "domain": "engineering",
+      "expected_complexity": "high",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "remediate-04-restart-the-production-api",
+    "prompt": "Restart the production API gateway to clear the stuck connections.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-05-fail-over-the-primary",
+    "prompt": "Fail over the primary orders database to its replica.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-06-revoke-the-leaked-deploy",
+    "prompt": "Revoke the leaked deploy token and rotate the production secrets it could read.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-07-scale-the-production-worker",
+    "prompt": "Scale the production worker pool down to zero to stop the runaway job.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-08-purge-the-poisoned-messages",
+    "prompt": "Purge the poisoned messages from the production payments queue.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-09-restore-the-customers-table",
+    "prompt": "Restore the customers table from last night's backup.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-10-block-the-abusive-ip",
+    "prompt": "Block the abusive IP range at the production load balancer.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-11-remediate-the-split-brain",
+    "prompt": "Remediate the split-brain in the production cluster: fence the stale primary, promote the healthy replica and re-seed the old node.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "high",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-12-fix-the-corrupted-search",
+    "prompt": "Fix the corrupted search index in production by rebuilding it from the source of truth and switching traffic over.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "high",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-13-recover-the-production-message",
+    "prompt": "Recover the production message broker after disk exhaustion: expand storage, replay the dead-letter queue and restore consumers in order.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "high",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "remediate-14-clear-the-staging-cache",
+    "prompt": "Clear the staging cache and restart the staging web tier to fix the stale configuration.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:remediate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "remediate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-04-escalate-the-suspected-credential",
+    "prompt": "Escalate the suspected credential leak to the security on-call.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "escalate-05-notify-the-incident-commander",
+    "prompt": "Notify the incident commander that the mitigation failed and request more responders.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "escalate-06-escalate-this-data-retention",
+    "prompt": "Escalate this data-retention question to legal before we delete anything.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "high"
+    }
+  },
+  {
+    "name": "escalate-07-escalate-this-unresolved-p1",
+    "prompt": "Escalate this unresolved P1 ticket to the engineering director.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-08-page-the-database-lead",
+    "prompt": "Page the database lead about the replication lag that has not recovered.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-09-escalate-the-customer-s",
+    "prompt": "Escalate the customer's refund dispute to the finance approver.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-10-escalate-the-missed-sla",
+    "prompt": "Escalate the missed SLA for the enterprise account to the VP of support.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-11-escalate-the-audit-finding",
+    "prompt": "Escalate the audit finding on access reviews to the compliance officer.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:low"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-12-escalate-the-vendor-outage",
+    "prompt": "Escalate the vendor outage to our account manager and request an incident bridge.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-13-raise-the-repeated-deployment",
+    "prompt": "Raise the repeated deployment failures with the platform team's manager, with the failure history attached.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "escalate-14-flag-the-capacity-shortfall",
+    "prompt": "Flag the capacity shortfall for next month's launch to infrastructure leadership, with the projected numbers.",
+    "tags": [
+      "labelled",
+      "shape:approval_gated_execution",
+      "goal:escalate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "approval_gated_execution"
+    ],
+    "metadata": {
+      "expected_goal": "escalate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "medium"
+    }
+  },
+  {
+    "name": "coordinate-05-coordinate-the-order-of",
+    "prompt": "Coordinate the order of these two steps for me: 'run tests' and 'merge'. Which goes first?",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:coordinate",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "coordinate-06-coordinate-a-single-thing",
+    "prompt": "Coordinate a single thing: tell me which comes first alphabetically, 'alerts' or 'metrics'.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:coordinate",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "coordinate-07-orchestrate-nothing-complicated-just",
+    "prompt": "Orchestrate nothing complicated: just tell me what a handoff between two agents is.",
+    "tags": [
+      "labelled",
+      "shape:direct_response",
+      "goal:coordinate",
+      "difficulty:low",
+      "trap"
+    ],
+    "expected_output_contains": [
+      "direct_response"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "low",
+      "expected_risk": "low"
+    }
+  },
+  {
+    "name": "coordinate-08-coordinate-a-two-stage",
+    "prompt": "Coordinate a two-stage review: the knowledge-base agent gathers the runbook, then the metric agent checks whether the runbook's thresholds hold.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "coordinate-09-run-the-onboarding-checks",
+    "prompt": "Run the onboarding checks in sequence: look up the service in the knowledge base, then probe its metrics, passing the findings along.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "coordinate-10-sequence-the-capacity-review",
+    "prompt": "Sequence the capacity review: one agent pulls the usage metric, the next reads the planning notes in the knowledge base, the last reconciles them.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "research",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe"
+      ]
+    }
+  },
+  {
+    "name": "coordinate-11-hand-the-incident-from",
+    "prompt": "Hand the incident from the alert agent to the metric agent, then to a summariser for the status page.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "coordinate-12-coordinate-the-weekly-health",
+    "prompt": "Coordinate the weekly health report: alerts first, metrics second, written summary last, each stage handing over its notes.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:medium"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "medium",
+      "expected_risk": "low",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "coordinate-13-coordinate-a-five-stage",
+    "prompt": "Coordinate a five-stage release check: knowledge-base release notes, alert review, metric baselines, canary comparison and a final sign-off summary, each handed to the next.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "coordinate-14-orchestrate-the-post-incident",
+    "prompt": "Orchestrate the post-incident workflow end to end: collect alerts, measure impact from metrics, pull the related runbooks, draft the timeline and hand the draft to a reviewer.",
+    "tags": [
+      "labelled",
+      "shape:handoff_chain",
+      "goal:coordinate",
+      "difficulty:high"
+    ],
+    "expected_output_contains": [
+      "handoff_chain"
+    ],
+    "metadata": {
+      "expected_goal": "coordinate",
+      "domain": "ops",
+      "expected_complexity": "high",
+      "expected_risk": "low",
+      "capabilities": [
+        "kb_search",
+        "metric_probe",
+        "alert_list"
       ]
     }
   },

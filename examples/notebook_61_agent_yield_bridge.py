@@ -11,9 +11,9 @@ ToolCompleteEvent, ReflectEvent, GroundingEvent, ModelChunkEvent,
 ModelCompleteEvent, InterruptEvent, CompactionEvent, TerminateEvent) is
 republished on the bus as an agent.* event when a run_context is open —
 each inspection the reviewer performs is visible in the run stream as a
-tool span. The bridge also maps ModelCompleteEvent to agent.tokens.used,
-but Agent.run never yields that event, so token counts come from
-result.metrics.
+tool span. The run's token totals reach the bus once, as agent.tokens.used
+bridged from the terminate event; result.metrics carries the same
+figures for code that has the result in hand.
 
 - How the ten bridged LocusEvent classes map to agent.* bus events.
 - Tool-call telemetry with span_id pairing (agent.tool.started and
@@ -101,10 +101,11 @@ async def part1_full_lifecycle() -> None:
         await bus.close_stream(rid)
 
 
-# Part 2: token usage as a cost meter. result.metrics is authoritative:
-# the bridge maps ModelCompleteEvent to agent.tokens.used, but Agent.run
-# never yields that event, so the bus carries no per-call token deltas.
-# Always-on privacy-review automation meters its spend from the result.
+# Part 2: token usage as a cost meter. result.metrics is authoritative
+# for code that has the result; the bus carries the same run totals once
+# as agent.tokens.used (scope="run"), and no per-call deltas, because
+# Agent.run never yields ModelCompleteEvent. Always-on privacy-review
+# automation meters its spend from the result.
 
 
 async def part2_token_meter() -> None:

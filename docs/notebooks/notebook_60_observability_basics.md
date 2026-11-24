@@ -23,12 +23,10 @@ What this notebook covers:
   lookup tool attached, and subscribe to the bus.
 - Watch the canonical events on the agent path land on the timeline:
   `agent.think`, the `agent.tool.started`/`agent.tool.completed` pair
-  and `agent.terminate`. `agent.tokens.used` (drawn dashed below) is
-  mapped from a [`ModelCompleteEvent`](../concepts/events.md#modelcompleteevent)
-  that carries usage, but `Agent.run` has no yield site for that event,
-  so the agent path never records it; token totals are available from
-  `result.metrics`, which [notebook 61](notebook_61_agent_yield_bridge.md)
-  meters.
+  and `agent.terminate`, then `agent.tokens.used` with the run's
+  cumulative counts, bridged from the terminate event when the provider
+  metered the run. The same totals are on `result.metrics`, which
+  [notebook 61](notebook_61_agent_yield_bridge.md) meters.
 - Read the per-run history buffer after the fact (replay semantics for
   late subscribers — reconstruct the ticket timeline after the run).
 - Record the same reply as OpenTelemetry spans. `TelemetryHook` names them
@@ -117,9 +115,10 @@ timeline events recorded (5):
   - agent.terminate
 
 --- Part 3: late subscriber — after-the-fact QA replay ---
-replayed 2 events from history (after the run finished)
+replayed 3 events from history (after the run finished)
   - agent.think
   - agent.terminate
+  - agent.tokens.used
 
 --- Part 4: OpenTelemetry spans under the GenAI semantic conventions ---
 agent reply: This is a mock response for testing purposes.

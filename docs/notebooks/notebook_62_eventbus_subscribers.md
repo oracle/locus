@@ -95,9 +95,10 @@ Running it offline — no credentials, bundled mock model — prints the event k
 ```text
 
 --- Part 1: telemetry forwarder vs per-deployment subscriber ---
-telemetry forwarder saw 4 events across both deployments:
+telemetry forwarder saw 5 events across both deployments:
   - deploy/agent.think
   - deploy/agent.terminate
+  - deploy/agent.tokens.used
   - deploy/agent.think
   - deploy/agent.terminate
 deploy-A subscriber saw 2 events (only its own rollout):

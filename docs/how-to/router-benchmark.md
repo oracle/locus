@@ -10,12 +10,14 @@ gate. Nothing is built or run; selection stops at the frame.
 
 ## 1. The corpus
 
-`benchmarks/router/cases.json` holds sixty-four `EvalCase` objects, read by
-`load_router_corpus`, which checks their shape. Two kinds:
+`benchmarks/router/cases.json` holds 198 `EvalCase` objects, read by
+`load_router_corpus`, which checks their shape: 180 labelled prompts,
+twenty-six of them traps, and eighteen adversarial ones.
 
 | Tag | Cases | Expectation |
 |---|---|---|
 | `labelled`, `shape:<id>`, `goal:<task>` | a prompt with a known right protocol | `expected_output_contains` is that id |
+| `difficulty:<level>` | on every labelled case: `low`, `medium` or `high`, the difficulty its author intends | splits the report, grades nothing |
 | `trap` | a labelled case whose verb points at an expensive shape while the work is one step | the low-cost shape |
 | `adversarial`, `injection` | tells the model to leave the protocol list | the answer is not `unbounded` |
 | `adversarial`, `ambiguous` | nothing in the catalogue fits | the answer is not `unbounded` |
@@ -25,6 +27,20 @@ Every target answers with one of three strings: a registered protocol id,
 selected (the frame was rejected, no protocol could take it, the provider
 failed). A refusal misses a label but is still bounded, which is the answer
 an adversarial prompt is allowed to get.
+
+A label is derivable, not a second opinion. Every labelled case states the
+frame its author intends in `metadata` (`expected_goal`,
+`expected_complexity`, `expected_risk` and, where the prompt names them,
+`capabilities`), and the label is the protocol the compiler selects for
+that frame; a unit test holds the file to it. The thirteen goals have
+thirteen or fourteen prompts each, spread over the three difficulties. The
+traps cover the nine goals whose canonical shape is not the low-cost one:
+a prompt that says plan, build, modify, diagnose, monitor, compare,
+coordinate, research or write code about work that is one step.
+
+The intended difficulty is the author's reading of the prompt. It is the
+hypothesis a difficulty measured from outcomes replaces, and the
+`difficulty:` rows of the table are where the two can be compared.
 
 The file is the one source of truth: the routing benchmark in
 `tests/integration/test_router_benchmark.py` and the gate below read the
@@ -89,7 +105,7 @@ a `RequestClassifier` factory for the `typed_classifier` target (without
 one, the default extractor goes through the seam, so that target measures
 the same path as `typed` until a trained classifier replaces it),
 `--verbose` prints every prompt with its expected protocol and what each
-reading answered. Sixty-four cases at three readings is 192 model calls per
+reading answered. 198 cases at three readings is 594 model calls per
 target.
 
 Each report goes to a `FileReportStore` under `benchmarks/router/reports/`
@@ -106,10 +122,11 @@ The script prints one table, a column per target and a row per tag, with
 ```text
 | tag | n | typed | typed_classifier | freeform |
 |---|---:|---|---|---|
-| all | 64 | strict (mean) | ... | ... |
-| labelled | 46 | ... | ... | ... |
-| trap | 2 | ... | ... | ... |
+| all | 198 | strict (mean) | ... | ... |
+| labelled | 180 | ... | ... | ... |
+| trap | 26 | ... | ... | ... |
 | injection | 8 | ... | ... | ... |
+| difficulty:low | 50 | ... | ... | ... |
 ```
 
 Each cell is `strict (mean)`. With three readings a case passes only when
