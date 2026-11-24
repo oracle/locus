@@ -148,6 +148,7 @@ suite's checks, folded into an ordinary report.
 ::: locus.evaluation.stores.ReportStore
 ::: locus.evaluation.stores.StoredReport
 ::: locus.evaluation.stores.FileReportStore
+::: locus.evaluation.stores.SqliteReportStore
 ::: locus.evaluation.stores.OracleReportStore
 ::: locus.evaluation.stores.OCIBucketReportStore
 ::: locus.evaluation.stores.S3ReportStore

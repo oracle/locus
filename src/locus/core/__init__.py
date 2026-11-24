@@ -33,6 +33,7 @@ from locus.core.errors import (
     ToolExecutionError,
     ToolNotFoundError,
     ToolValidationError,
+    UnknownProviderError,
     ValidationError,
     VectorStoreError,
 )
@@ -137,6 +138,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolNotFoundError",
     "ToolValidationError",
+    "UnknownProviderError",
     "ValidationError",
     "VectorStoreError",
     # Messages
