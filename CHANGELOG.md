@@ -8,6 +8,21 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Difficulty measured from outcomes for the router corpus.**
+  `locus.router.difficulty` answers every labelled prompt in one reply, with
+  no tools, on two or more models given cheapest first, and has a judge grade
+  each answer against one rubric (`ANSWER_RUBRIC`, or a case's own
+  `answer_rubric`). `measure_difficulty` reads the level from the tier
+  reports: `low` when the cheapest tier's reply passes, `medium` when only a
+  stronger one's does, `high` when none does, `not_measured` when a tier was
+  not graded and no other settled it. `confusion_table` sets the intended
+  level against the measured one, with the traps on their own row, and
+  `disagreements` lists the cases where they differ.
+  `scripts/router_difficulty.py` runs it and writes the measurement as JSON
+  (#342).
+
 ### Changed
 
 - **The router benchmark corpus is 180 labelled prompts with 26 traps.**

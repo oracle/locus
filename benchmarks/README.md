@@ -105,3 +105,13 @@ report. The same gate runs as
 `RUN_ROUTER_BENCHMARK=1`. The how-to
 [Benchmark the router](../docs/how-to/router-benchmark.md) explains the
 tags, the table and the gate.
+
+The `difficulty:` tags are the author's reading. `scripts/router_difficulty.py`
+measures the level from outcomes: each labelled prompt is answered in one
+reply by two or more models, cheapest first, a judge grades the answers,
+and a prompt is `low`, `medium` or `high` by which tier's reply passes.
+
+```bash
+python scripts/router_difficulty.py \
+  --tiers oci:<small-model> oci:<large-model> --judge oci:<judge-model> --repeats 3
+```
