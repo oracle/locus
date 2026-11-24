@@ -231,18 +231,25 @@ def model_id_of(model: object) -> str | None:
     """The model slug a model object (or a string id) is called with.
 
     A string is returned as-is. An object is read the way the rest of the
-    SDK reads it: ``model.config.model`` (every native binding), else a
-    string ``model.model``. Wrappers that proxy attribute access to an inner
-    model — a ``FallbackChain`` (its ``config`` is the primary tier's), or a
-    caller's per-turn view that forwards ``__getattr__`` — resolve through
-    the proxy. ``None`` when nothing names the model.
+    SDK reads it: ``model.config.model`` (every native binding), else
+    ``model.config.model_id`` (the OCI SDK transport, ``OCIModel``, names its
+    model there), else a string ``model.model``. Wrappers that proxy attribute
+    access to an inner model — a ``FallbackChain`` (its ``config`` is the
+    primary tier's), or a caller's per-turn view that forwards
+    ``__getattr__`` — resolve through the proxy. ``None`` when nothing names
+    the model.
     """
     if isinstance(model, str):
         return model
-    name = getattr(getattr(model, "config", None), "model", None)
-    if not isinstance(name, str) or not name:
-        name = getattr(model, "model", None)
-    return name if isinstance(name, str) and name else None
+    config = getattr(model, "config", None)
+    for name in (
+        getattr(config, "model", None),
+        getattr(config, "model_id", None),
+        getattr(model, "model", None),
+    ):
+        if isinstance(name, str) and name:
+            return name
+    return None
 
 
 async def discover_context_length(

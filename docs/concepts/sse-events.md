@@ -191,11 +191,19 @@ returns. Like every `emit()` site, a no-op without a bound run id.
 
 | Event | Payload |
 |---|---|
-| `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`; the HTTP+JSON routes report the A2A 1.0 operation name, such as `SendMessage`, and a null `rpc_id`) |
+| `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`; the HTTP+JSON routes and the gRPC binding report the A2A 1.0 operation name, such as `SendMessage`, and a null `rpc_id`) |
 | `a2a.task.processing` | `task_id`, `context_id`, `resumed` (true when the task continues after an interrupt) |
 | `a2a.task.completed` | `method`, `success`, `error_code` (on a protocol or internal error; absent when a streaming client left mid-stream), `duration_ms` |
 | `a2a.client.send` | `target_url`, `method`, `binding` (from the v1 transports) |
 | `a2a.client.received` | `target_url`, `method`, `binding` (from the v1 transports), `status_code` (null when no response arrived; the gRPC status on the gRPC binding, 0 for OK), `duration_ms`, `content_length` (one-shot calls) or `frames` (streaming methods: the frames the stream yielded, also when the consumer stopped reading early), `error` (the exception type when the call failed in transit, `HTTPStatusError` for an error status, the gRPC status name on the gRPC binding) |
+
+The three server bindings publish the same `a2a.task.*` events. An HTTP
+request is served in the context of the application that hosts the routes,
+so a middleware that binds a run id decides where its events go. A gRPC call
+is served in a task the `grpc.aio` server creates, which inherits the context
+the server was started in: start the server inside `run_context()` and every
+call it serves publishes under that run id. To give each call its own run,
+bind the id in a server interceptor (`set_run_id()` before the handler runs).
 
 ### `skills.*` — skill activation
 

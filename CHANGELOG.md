@@ -17,6 +17,27 @@ policy.
   argument name that follows it; that token is allowlisted in
   `.gitleaks.toml`, and the full history scans clean with both versions.
 
+### Fixed
+
+- **A2A gRPC requests publish `a2a.task.received` and `a2a.task.completed`.**
+  The gRPC binding served a call with `a2a.task.processing` and nothing
+  around it. Unary and streaming calls now publish the bracket the JSON-RPC
+  and HTTP+JSON bindings publish: `received` with the A2A 1.0 operation name
+  and a null `rpc_id`; `completed` with `success`, `duration_ms` and, on a
+  protocol or internal error, `error_code`. A stream completes when its
+  generator ends, also when the client cancels. The events land on the run
+  that was bound when the gRPC server started (#618).
+- **The A2A gRPC client cancels a stream its consumer stops reading.** A
+  consumer that closed `stream()` before the last frame left the call open
+  and the server producing frames for nobody; the call is now cancelled when
+  the iterator is closed.
+- **`OCIModel` resolves its model metadata.** The OCI SDK transport names its
+  model in `config.model_id`, which `locus.models.metadata.model_id_of` did
+  not read, so an agent on `OCIModel` logged "No context window known for
+  model '<unnamed>'", kept a message window instead of counting tokens, and
+  had no prices for `max_cost_usd`. The id now resolves, and with it the
+  context window and prices of the model.
+
 ## [6.5.0] - 2026-11-24
 
 ### Added
