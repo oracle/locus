@@ -8,6 +8,21 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **The model catalogue covers the chat models OCI Generative AI serves.**
+  `locus.models.metadata` seeds the rest of the OpenAI line OCI offers
+  (`gpt-4.1-nano`, the search previews, `gpt-5-codex`, `gpt-5-nano`, the
+  `gpt-5.1` chat and codex variants, `gpt-5.2` and its chat, codex and pro
+  variants, `gpt-5.3-codex`, `gpt-5.4` with mini, nano and pro, `gpt-5.5-pro`,
+  `o3-mini`, the two audio models, `gpt-oss-120b` and `gpt-oss-20b`) with the
+  windows, output caps and list prices OpenAI publishes, prices `gpt-5`,
+  `gpt-5-mini`, `gpt-5.1`, `o1`, `o3` and `o4-mini`, and adds Cohere Command A
+  Reasoning and Vision, Llama 3.1 405B, Llama 4 Scout, Gemini 2.5 Flash-Lite
+  and Grok 4.7, 4.6, 4.3 and 4.20 with the windows the OCI model pages state.
+  An agent on any of them through `oci:<vendor>.<model>` counts tokens
+  against the real window, and `max_cost_usd` prices the OpenAI ones.
+
 ## [6.6.0] - 2026-11-24
 
 ### Added
