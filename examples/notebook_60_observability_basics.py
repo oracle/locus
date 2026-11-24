@@ -26,9 +26,8 @@ allocations.
 - Reply on the same ticket inside run_context(), this time with a lookup
   tool attached, and subscribe to the bus.
 - The canonical events on the agent path: agent.think,
-  agent.tool.started/completed, agent.terminate. agent.tokens.used is
-  mapped from a ModelCompleteEvent that carries usage, but Agent.run never
-  yields that event, so the agent path does not record it.
+  agent.tool.started/completed, agent.terminate, then agent.tokens.used
+  with the run's cumulative counts when the provider metered the run.
 - Read the per-run history buffer after the fact (replay semantics for
   late subscribers — i.e. reconstruct the ticket timeline after the run).
 - The same ticket reply as OpenTelemetry spans: TelemetryHook names them per
