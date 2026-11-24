@@ -22,6 +22,14 @@ policy.
   `disagreements` lists the cases where they differ.
   `scripts/router_difficulty.py` runs it and writes the measurement as JSON
   (#342).
+- **The model catalogue knows the GPT-5.6 and GPT-6 generations.**
+  `locus.models.metadata` seeds `gpt-5.6-luna`, `gpt-5.6-sol`,
+  `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6.1-sol`,
+  `gpt-6.1-terra`, `gpt-6.2-astra` and `gpt-6.2-sol` with the 1,050,000-token
+  window, the 128,000-token output cap and the standard-tier list prices
+  OpenAI publishes, so an agent on one of them through OCI Generative AI
+  (`oci:openai.<slug>`) counts tokens against the real window instead of
+  keeping a message window, and `max_cost_usd` can price it.
 
 ### Changed
 
