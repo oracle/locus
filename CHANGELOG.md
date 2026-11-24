@@ -8,8 +8,32 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **The model catalogue covers the chat models OCI Generative AI serves.**
+  `locus.models.metadata` seeds the rest of the OpenAI line OCI offers
+  (`gpt-4.1-nano`, the search previews, `gpt-5-codex`, `gpt-5-nano`, the
+  `gpt-5.1` chat and codex variants, `gpt-5.2` and its chat, codex and pro
+  variants, `gpt-5.3-codex`, `gpt-5.4` with mini, nano and pro, `gpt-5.5-pro`,
+  `o3-mini`, the two audio models, `gpt-oss-120b` and `gpt-oss-20b`) with the
+  windows, output caps and list prices OpenAI publishes, prices `gpt-5`,
+  `gpt-5-mini`, `gpt-5.1`, `o1`, `o3` and `o4-mini`, and adds Cohere Command A
+  Reasoning and Vision, Llama 3.1 405B, Llama 4 Scout, Gemini 2.5 Flash-Lite
+  and Grok 4.7, 4.6, 4.3 and 4.20 with the windows the OCI model pages state.
+  An agent on any of them through `oci:<vendor>.<model>` counts tokens
+  against the real window, and `max_cost_usd` prices the OpenAI ones.
+
 ### Fixed
 
+- **`register_metadata` stores an entry under the key lookup uses.** A
+  record registered under a prefixed id (`oci:openai.gpt-5.5`, the recipe
+  the observability page gives for pricing an OCI-served model at OCI's
+  rate) was never found: `metadata_for` strips the provider prefix before
+  it searches, so the registered key did not match and the built-in record
+  of the model the id serves answered instead. The prefix is now stripped at
+  registration too, so the entry is found under every spelling of the id
+  and wins over the built-in record; an unknown prefix stays part of the
+  slug.
 - **`specialist_fanout` and `handoff_chain` answer the request.** Each agent
   of these two router protocols has one tool. The fan-out gave every
   specialist the whole request and joined their outputs, so an answer held a
@@ -20,6 +44,14 @@ policy.
   stay on `raw.outputs`). A fan-out specialist is given its own part of the
   request and reports what its tool returned. Each shape makes one more
   model call (#634).
+
+### Documentation
+
+- The observability page's paragraph on `cost_usd` said an OCI id had no
+  entry and no price until registered; OCI ids have resolved the served
+  model's entry since the catalogue learned them, and the OpenAI line
+  carries list prices. It now says which OCI-served models are priced,
+  which carry only a window, and how a registered rate takes precedence.
 
 ## [6.6.0] - 2026-11-24
 

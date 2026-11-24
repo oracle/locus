@@ -156,6 +156,53 @@ class TestRegisterMetadata:
         assert md.family == "v2"
         assert md.context_length == 2_000
 
+    def test_register_under_a_provider_prefix_is_found_by_every_spelling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The documented recipe: price an OCI-served model under its full id.
+        # Lookup strips ``oci:`` before it searches, so the entry has to be
+        # stored under the stripped key or it is never found — and it has to
+        # win over the built-in record of the model the id serves.
+        from locus.models import metadata as module
+
+        monkeypatch.setattr(module, "_registry", dict(module._registry))
+        built_in = metadata_for("oci:openai.gpt-5.5")
+        assert built_in is not None
+        assert built_in.model_id == "gpt-5.5"
+        register_metadata(
+            ModelMetadata(
+                model_id="oci:openai.gpt-5.5",
+                family="openai",
+                context_length=400_000,
+                max_output_tokens=128_000,
+                input_price_per_mtok="3.00",
+                output_price_per_mtok="12.00",
+            )
+        )
+        for spelling in ("oci:openai.gpt-5.5", "openai.gpt-5.5", " oci:openai.gpt-5.5 "):
+            md = metadata_for(spelling)
+            assert md is not None, spelling
+            assert md.model_id == "openai.gpt-5.5"
+            assert md.input_price_per_mtok == Decimal("3.00")
+        # The vendor's own record is untouched for callers that name it directly.
+        plain = metadata_for("gpt-5.5")
+        assert plain is not None
+        assert plain.input_price_per_mtok == Decimal("1.25")
+
+    def test_register_keeps_an_unknown_prefix(self) -> None:
+        register_metadata(
+            ModelMetadata(
+                model_id="acme:house-model",
+                family="acme",
+                context_length=8_000,
+                max_output_tokens=1_000,
+            )
+        )
+        md = metadata_for("acme:house-model")
+        assert md is not None
+        assert md.model_id == "acme:house-model"
+        assert metadata_for("house-model") is None
+
 
 # ---------------------------------------------------------------------------
 # known_models snapshot.
@@ -448,6 +495,18 @@ class TestOCIModelIds:
             ("oci:cohere.command-a-03-2025", "command-a-03-2025", 256_000),
             ("oci:cohere.command-r-plus-08-2024", "command-r-plus-08-2024", 128_000),
             ("oci:google.gemini-2.5-pro", "gemini-2.5-pro", 1_048_576),
+            ("oci:google.gemini-2.5-flash-lite", "gemini-2.5-flash-lite", 1_048_576),
+            ("oci:cohere.command-a-reasoning", "command-a-reasoning", 256_000),
+            ("oci:cohere.command-a-vision", "command-a-vision", 128_000),
+            ("oci:meta.llama-3.1-405b-instruct", "llama-3.1-405b-instruct", 128_000),
+            ("oci:meta.llama-4-scout-17b-16e-instruct", "llama-4-scout-17b-16e-instruct", 192_000),
+            ("oci:xai.grok-4.7", "grok-4.7", 500_000),
+            ("xai.grok-4.6", "grok-4.6", 500_000),
+            ("oci:xai.grok-4.3", "grok-4.3", 1_000_000),
+            ("oci:xai.grok-4.20-non-reasoning", "grok-4.20-non-reasoning", 1_000_000),
+            ("oci:xai.grok-4.20-multi-agent-0309", "grok-4.20-multi-agent-0309", 1_000_000),
+            ("oci:openai.gpt-oss-120b", "gpt-oss-120b", 131_072),
+            ("oci:openai.gpt-oss-20b", "gpt-oss-20b", 131_072),
             ("oci:google.gemini-2.5-flash", "gemini-2.5-flash", 1_048_576),
             ("oci:xai.grok-4", "grok-4", 128_000),
             ("oci-responses:openai.gpt-5.5", "gpt-5.5", 400_000),

@@ -336,15 +336,20 @@ prefixes (`openai:`, `anthropic:` and the OpenAI-compatible routing
 prefixes such as `vllm:` or `openrouter:`) and then needs an entry for
 the slug that remains: a dated snapshot or `-latest` suffix resolves to
 its base slug, but a longer id never inherits a shorter entry's price.
-`oci:` is not one of those prefixes, so an OCI id is looked up whole,
-and the table has no OCI entry — for the `{{ locus_example_model }}`
-agent above, `cost_usd` is `None` until you register the model's list
-price under its full id. Register prices for your model with
+An OCI id resolves the entry of the model it serves: `oci:openai.gpt-5.5`
+is `gpt-5.5`, so the `{{ locus_example_model }}` agent above reports a
+`cost_usd` from OpenAI's list price for that model. OCI bills at its
+own rates, and the Cohere, Meta, Google and xAI entries carry windows
+but no prices (`cost_usd` is `None` on them), so register the rate
+your route bills under the model's full id with
 `register_metadata(ModelMetadata(model_id="{{ locus_example_model }}", ..., input_price_per_mtok=..., output_price_per_mtok=...))`
-from `locus.models.metadata` before you construct the agent — prices
-are read once, when the `Agent` is built. The same prices drive `max_cost_usd`: set
-a budget on an unpriced model and the `Agent` constructor raises
-`ValueError` rather than run a budget that could never stop anything.
+from `locus.models.metadata` before you construct the agent; the entry
+is stored under the id with its provider prefix stripped, so it is
+found under `{{ locus_example_model }}` and `openai.gpt-5.5` alike and
+wins over the built-in record. Prices are read once, when the `Agent`
+is built. The same prices drive `max_cost_usd`: set a budget on an
+unpriced model and the `Agent` constructor raises `ValueError` rather
+than run a budget that could never stop anything.
 For dashboards, key on `agent_id` plus the same metrics the
 `TelemetryHook` already emits — no glue code needed.
 

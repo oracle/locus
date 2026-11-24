@@ -178,10 +178,22 @@ def register_metadata(md: ModelMetadata) -> None:
 
     Call at import time from user code to add fine-tunes, regional
     aliases, or self-hosted models that Locus doesn't ship
-    seed data for.
+    seed data for, or to price a model at the rate your route bills
+    (an OCI id such as ``"oci:openai.gpt-5.5"`` at OCI's rate rather
+    than the vendor's list price).
+
+    The entry is stored under the same key :func:`metadata_for` looks up:
+    a provider prefix Locus knows (``openai:``, ``oci:``, ``openrouter:``
+    and the rest) is stripped, so ``"oci:openai.gpt-5.5"`` and
+    ``"openai.gpt-5.5"`` name one entry, and that entry wins over the
+    built-in record of the model the OCI id serves (``gpt-5.5``). An
+    unknown prefix is part of the slug and is kept.
     """
+    key = _strip_prefix(md.model_id.strip())
+    if key != md.model_id:
+        md = md.model_copy(update={"model_id": key})
     with _lock:
-        _registry[md.model_id] = md
+        _registry[key] = md
 
 
 def metadata_for(model_id: str) -> ModelMetadata | None:
@@ -413,6 +425,8 @@ _seed(
     context_length=400_000,
     max_output_tokens=128_000,
     supports_prompt_caching=True,
+    input_price_per_mtok="1.25",
+    output_price_per_mtok="10.00",
 )
 _seed(
     "gpt-5-mini",
@@ -420,24 +434,32 @@ _seed(
     context_length=400_000,
     max_output_tokens=64_000,
     supports_prompt_caching=True,
+    input_price_per_mtok="0.25",
+    output_price_per_mtok="2.00",
 )
 _seed(
     "o1",
     family="openai",
     context_length=200_000,
     max_output_tokens=100_000,
+    input_price_per_mtok="15.00",
+    output_price_per_mtok="60.00",
 )
 _seed(
     "o3",
     family="openai",
     context_length=200_000,
     max_output_tokens=100_000,
+    input_price_per_mtok="2.00",
+    output_price_per_mtok="8.00",
 )
 _seed(
     "o4-mini",
     family="openai",
     context_length=200_000,
     max_output_tokens=100_000,
+    input_price_per_mtok="1.10",
+    output_price_per_mtok="4.40",
 )
 
 # Anthropic
@@ -477,6 +499,8 @@ _seed(
     context_length=400_000,
     max_output_tokens=128_000,
     supports_prompt_caching=True,
+    input_price_per_mtok="1.25",
+    output_price_per_mtok="10.00",
 )
 
 # OpenAI GPT-5.5. Prices and window are the listed rates locus-code's price
@@ -525,6 +549,56 @@ for _slug, _in, _out in (
         input_price_per_mtok=_in,
         output_price_per_mtok=_out,
     )
+
+# The rest of the OpenAI line that OCI Generative AI serves as ``openai.<slug>``
+# (windows, output caps and standard-tier short-context list prices as the
+# OpenAI model pages publish them, read 2026-11-24). Several of these are
+# deprecated or shut down on OpenAI's own API and still served by OCI; dated
+# snapshots (``gpt-5.2-2025-12-11``) resolve to these base records. The
+# ``-codex`` and ``-pro`` models answer only on the Responses endpoint. The two
+# audio models carry their text rates; audio tokens are billed separately.
+for _slug, _window, _output, _in, _out in (
+    ("gpt-4.1-nano", 1_047_576, 32_768, "0.10", "0.40"),
+    ("gpt-4o-search-preview", 128_000, 16_384, "2.50", "10.00"),
+    ("gpt-4o-mini-search-preview", 128_000, 16_384, "0.15", "0.60"),
+    ("gpt-5-codex", 400_000, 128_000, "1.25", "10.00"),
+    ("gpt-5-nano", 400_000, 128_000, "0.05", "0.40"),
+    ("gpt-5.1-chat-latest", 128_000, 16_384, "1.25", "10.00"),
+    ("gpt-5.1-codex", 400_000, 128_000, "1.25", "10.00"),
+    ("gpt-5.1-codex-max", 400_000, 128_000, "1.25", "10.00"),
+    ("gpt-5.1-codex-mini", 400_000, 128_000, "0.25", "2.00"),
+    ("gpt-5.2", 400_000, 128_000, "1.75", "14.00"),
+    ("gpt-5.2-chat-latest", 128_000, 16_384, "1.75", "14.00"),
+    ("gpt-5.2-codex", 400_000, 128_000, "1.75", "14.00"),
+    ("gpt-5.2-pro", 400_000, 128_000, "21.00", "168.00"),
+    ("gpt-5.3-codex", 400_000, 128_000, "1.75", "14.00"),
+    ("gpt-5.4", 1_050_000, 128_000, "2.50", "15.00"),
+    ("gpt-5.4-mini", 400_000, 128_000, "0.75", "4.50"),
+    ("gpt-5.4-nano", 400_000, 128_000, "0.20", "1.25"),
+    ("gpt-5.4-pro", 1_050_000, 128_000, "30.00", "180.00"),
+    ("gpt-5.5-pro", 1_050_000, 128_000, "30.00", "180.00"),
+    ("o3-mini", 200_000, 100_000, "1.10", "4.40"),
+    ("gpt-audio", 128_000, 16_384, "2.50", "10.00"),
+    ("gpt-audio-mini", 128_000, 16_384, "0.60", "2.40"),
+):
+    _seed(
+        _slug,
+        family="openai",
+        context_length=_window,
+        max_output_tokens=_output,
+        supports_prompt_caching=True,
+        input_price_per_mtok=_in,
+        output_price_per_mtok=_out,
+    )
+del _slug, _window, _output, _in, _out
+
+# OpenAI's open-weight models, served by OCI as ``openai.gpt-oss-120b`` and
+# ``openai.gpt-oss-20b``: 131,072-token window and output cap per the OpenAI
+# model pages (2026-11-24). No prices — they have no OpenAI list price and OCI
+# bills at its own rates, which a budget registers itself.
+for _slug in ("gpt-oss-120b", "gpt-oss-20b"):
+    _seed(_slug, family="openai", context_length=131_072, max_output_tokens=131_072)
+del _slug
 
 # Anthropic, current generation — ids, windows, output caps and first-party
 # list prices as published 2026-09-25. Every one of these takes the full 1M
@@ -653,6 +727,28 @@ for _slug, _family, _window, _output in (
     ("gemini-2.5-pro", "google", 1_048_576, 65_536),
     ("gemini-2.5-flash", "google", 1_048_576, 65_536),
     ("grok-4", "xai", 128_000, 16_000),
+    # Added 2026-11-24 from the OCI model pages of that day. Llama 4 Scout's
+    # cap is the one the service itself named when asked for more
+    # ("supports at most 196608 completion tokens"); Command A Vision's page
+    # gives no cap, so it carries the on-demand Cohere figure. Grok 4.3 and
+    # 4.20 pages give a 131,000 playground cap; the Grok 4.7 and 4.6 pages
+    # give none and the service accepted any value asked, so they carry their
+    # siblings' figure. The 4.20 variants are the ids OCI lists for one model.
+    ("command-a-reasoning", "cohere", 256_000, 4_000),
+    ("command-a-vision", "cohere", 128_000, 4_000),
+    ("llama-3.1-405b-instruct", "meta", 128_000, 4_000),
+    ("llama-4-scout-17b-16e-instruct", "meta", 192_000, 196_608),
+    ("gemini-2.5-flash-lite", "google", 1_048_576, 65_536),
+    ("grok-4.7", "xai", 500_000, 131_000),
+    ("grok-4.6", "xai", 500_000, 131_000),
+    ("grok-4.3", "xai", 1_000_000, 131_000),
+    ("grok-4.20", "xai", 1_000_000, 131_000),
+    ("grok-4.20-reasoning", "xai", 1_000_000, 131_000),
+    ("grok-4.20-non-reasoning", "xai", 1_000_000, 131_000),
+    ("grok-4.20-0309-reasoning", "xai", 1_000_000, 131_000),
+    ("grok-4.20-0309-non-reasoning", "xai", 1_000_000, 131_000),
+    ("grok-4.20-multi-agent", "xai", 1_000_000, 131_000),
+    ("grok-4.20-multi-agent-0309", "xai", 1_000_000, 131_000),
 ):
     _seed(_slug, family=_family, context_length=_window, max_output_tokens=_output)
 del _slug, _family, _window, _output
