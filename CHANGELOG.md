@@ -8,6 +8,15 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **The secret scan runs gitleaks 8.30.1.** The CI pin moves from 8.21.2
+  (October 2024) to the current release, which adds and tightens detection
+  rules. One of them reads the invalid-`auth_type` case in
+  `tests/unit/test_decision.py` as a credential and reports the keyword
+  argument name that follows it; that token is allowlisted in
+  `.gitleaks.toml`, and the full history scans clean with both versions.
+
 ### Fixed
 
 - **A2A gRPC requests publish `a2a.task.received` and `a2a.task.completed`.**
