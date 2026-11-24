@@ -199,6 +199,33 @@ class TestCustomEmit:
         assert len(updates) == 1
         assert updates[0].data == {"done": True}
 
+    async def test_emit_custom_names_the_node_it_runs_in(self):
+        """Without ``node_id`` the event carries the id of the emitting node;
+        an explicit ``node_id`` still wins."""
+
+        async def first(state: dict[str, Any]) -> dict[str, Any]:
+            await emit_custom({"from": "first"})
+            return {"a": 1}
+
+        async def second(state: dict[str, Any]) -> dict[str, Any]:
+            await emit_custom({"from": "second"})
+            await emit_custom({"from": "tagged"}, node_id="elsewhere")
+            return {"b": 2}
+
+        g = StateGraph(id="custom-node-id")
+        g.add_node(Node(id="one", name="one", executor=first))
+        g.add_node(Node(id="two", name="two", executor=second))
+        g.add_edge(START, "one")
+        g.add_edge("one", "two")
+        g.add_edge("two", END)
+
+        custom = [
+            (ev.node_id, ev.data["from"])
+            async for ev in g.stream({}, mode=StreamMode.UPDATES)
+            if ev.mode == StreamMode.CUSTOM
+        ]
+        assert custom == [("one", "first"), ("two", "second"), ("elsewhere", "tagged")]
+
     async def test_emit_custom_outside_streaming_is_noop(self):
         """``emit_custom`` outside a ``stream()`` context must not raise.
 

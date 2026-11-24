@@ -66,6 +66,7 @@ from locus.core.interrupt import (
     InterruptException,
     InterruptState,
     NodeExecutionContext,
+    get_current_node_id,
 )
 from locus.core.reducers import (
     Reducer,
@@ -593,6 +594,9 @@ async def emit_custom(data: Any, *, node_id: str | None = None) -> None:
     ``StateGraph.stream()`` immediately; outside a streaming context it's
     a silent no-op so the same node code works under ``execute()`` too.
 
+    The event's ``node_id`` is the node the call runs in; pass ``node_id``
+    to name another source.
+
     Example::
 
         async def long_running_node(state):
@@ -604,6 +608,8 @@ async def emit_custom(data: Any, *, node_id: str | None = None) -> None:
     sink = _active_stream_sink.get()
     if sink is None:
         return
+    if node_id is None:
+        node_id = get_current_node_id()
     await sink(StreamEvent(mode=StreamMode.CUSTOM, node_id=node_id, data=data))
 
 
