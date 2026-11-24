@@ -585,3 +585,81 @@ class TestToolsRefusedUnderReasoning:
         with pytest.raises(openai.BadRequestError):
             await model.complete([Message.user("Hi")], tools=self._TOOLS)
         assert create.call_count == 1
+
+    # --- the streaming call takes the same decision -------------------------
+
+    @staticmethod
+    def _stream(text: str = "17 in stock"):
+        """A streamed turn: two content deltas, then the finish chunk."""
+        from types import SimpleNamespace
+
+        def chunk(content, finish=None):
+            delta = SimpleNamespace(content=content, tool_calls=None)
+            choice = SimpleNamespace(delta=delta, finish_reason=finish)
+            return SimpleNamespace(model="openai.gpt-6-luna", usage=None, choices=[choice])
+
+        head, tail = text[: len(text) // 2], text[len(text) // 2 :]
+        chunks = [chunk(head), chunk(tail), chunk(None, finish="stop")]
+
+        async def turn():
+            for c in chunks:
+                yield c
+
+        return turn()
+
+    @staticmethod
+    async def _text_of(events) -> str:
+        return "".join([e.content async for e in events if e.content])
+
+    @pytest.mark.asyncio
+    async def test_streamed_refusal_is_retried_with_none_and_logged_once(self, caplog):
+        model = self._model()
+        create = self._wire(model, self._refusal(self._MESSAGE), self._stream(), self._stream())
+        with caplog.at_level(logging.WARNING, logger="locus.models.providers.oci"):
+            text = await self._text_of(model.stream([Message.user("Hi")], tools=self._TOOLS))
+        assert text == "17 in stock"
+        assert create.call_count == 2
+        assert create.call_args_list[1].kwargs["extra_body"]["reasoning_effort"] == "none"
+        notices = [r for r in caplog.records if "reasoning_effort='none'" in r.getMessage()]
+        assert len(notices) == 1
+        assert "OCIChatCompletionsModel" in notices[0].getMessage()
+        # The next streamed turn with tools goes out with "none" at once, silently.
+        caplog.clear()
+        text = await self._text_of(model.stream([Message.user("Again")], tools=self._TOOLS))
+        assert text == "17 in stock"
+        assert create.call_count == 3
+        assert create.call_args_list[2].kwargs["extra_body"]["reasoning_effort"] == "none"
+        assert not [r for r in caplog.records if "reasoning_effort" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_streamed_other_400_is_raised(self):
+        import openai
+
+        model = self._model()
+        create = self._wire(model, self._refusal("Unknown parameter: 'seed'"))
+        with pytest.raises(openai.BadRequestError):
+            await self._text_of(model.stream([Message.user("Hi")], tools=self._TOOLS))
+        assert create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_streamed_refusal_without_tools_is_raised(self):
+        import openai
+
+        model = self._model()
+        create = self._wire(model, self._refusal(self._MESSAGE))
+        with pytest.raises(openai.BadRequestError):
+            await self._text_of(model.stream([Message.user("Hi")]))
+        assert create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_turn_that_streams_nothing_yields_nothing(self):
+        """The guard for a turn that ends before its first event."""
+        model = self._model()
+
+        async def silent(*_args, **_kwargs):
+            return
+            yield  # pragma: no cover — makes this an async generator
+
+        with patch.object(type(model), "_stream_oci_turn", silent):
+            events = [e async for e in model.stream([Message.user("Hi")], tools=self._TOOLS)]
+        assert events == []
