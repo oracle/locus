@@ -10,7 +10,7 @@ gate. Nothing is built or run; selection stops at the frame.
 
 ## 1. The corpus
 
-`benchmarks/router/cases.json` holds sixty `EvalCase` objects, read by
+`benchmarks/router/cases.json` holds sixty-four `EvalCase` objects, read by
 `load_router_corpus`, which checks their shape. Two kinds:
 
 | Tag | Cases | Expectation |
@@ -89,7 +89,7 @@ a `RequestClassifier` factory for the `typed_classifier` target (without
 one, the default extractor goes through the seam, so that target measures
 the same path as `typed` until a trained classifier replaces it),
 `--verbose` prints every prompt with its expected protocol and what each
-reading answered. Sixty cases at three readings is 180 model calls per
+reading answered. Sixty-four cases at three readings is 192 model calls per
 target.
 
 Each report goes to a `FileReportStore` under `benchmarks/router/reports/`
@@ -106,8 +106,8 @@ The script prints one table, a column per target and a row per tag, with
 ```text
 | tag | n | typed | typed_classifier | freeform |
 |---|---:|---|---|---|
-| all | 60 | strict (mean) | ... | ... |
-| labelled | 42 | ... | ... | ... |
+| all | 64 | strict (mean) | ... | ... |
+| labelled | 46 | ... | ... | ... |
 | trap | 2 | ... | ... | ... |
 | injection | 8 | ... | ... | ... |
 ```

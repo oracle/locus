@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 
 from locus.core.state import AgentState
+from tests.integration.conftest import POSTGRES_SHORT_TTL
 from tests.unit.checkpointer_time_travel_conformance import (
     SCOPE_A,
     SCOPE_B,
@@ -160,12 +161,7 @@ class TestPostgresAdapterTimeTravel(
     BoundedHistoryConformance,
     ProductionSettingsConformance,
 ):
-    # The ttl cases warm a fresh checkpointer before their timed window (the
-    # connection and the first-write DDL under the advisory lock happen in the
-    # first save, with the expiry stamp taken before them); the wider window
-    # keeps a margin for two saves and a list on a loaded runner, where the
-    # default 0.2 s has run out before the second save landed (#565).
-    short_ttl = 1.0
+    short_ttl = POSTGRES_SHORT_TTL
 
     def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import postgresql_checkpointer
@@ -187,7 +183,7 @@ class TestPgCheckpointerTimeTravel(
     BoundedHistoryConformance,
     ProductionSettingsConformance,
 ):
-    short_ttl = 1.0  # same two-turn window as the adapter class above
+    short_ttl = POSTGRES_SHORT_TTL
 
     def _build(self, keep: int | None, **settings: Any) -> Any:
         from locus.memory.backends import PgCheckpointer

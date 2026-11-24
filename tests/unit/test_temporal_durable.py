@@ -11,7 +11,9 @@ person approves, and a new worker finishes the run with the refund made once.
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -40,12 +42,48 @@ from locus.tools.decorator import tool  # noqa: E402
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
-    from pathlib import Path
+
+
+#: Directory the Temporal dev-server binary is downloaded into and reused from.
+#: Unset, the SDK uses the system temporary directory; CI points it at a path
+#: it caches between runs, so a warm run starts the server without a download.
+DEV_SERVER_DIR_ENV = "LOCUS_TEMPORAL_DEV_SERVER_DIR"
+
+#: Why the dev server could not be started, once two attempts have failed.
+#: The remaining tests of the module then skip without trying again.
+_dev_server_unavailable: str | None = None
+
+
+async def _start_dev_server() -> WorkflowEnvironment:
+    """Start the local dev server; retry once, then skip the module.
+
+    ``start_local`` downloads the Temporal CLI the first time it runs. A
+    download that fails or arrives corrupt raises ``RuntimeError`` here,
+    before any test body runs; it says nothing about the code under test, so
+    it is retried once and then reported as a skip with the reason.
+    """
+    global _dev_server_unavailable  # noqa: PLW0603
+    if _dev_server_unavailable is not None:
+        pytest.skip(_dev_server_unavailable)
+    download_dir = os.environ.get(DEV_SERVER_DIR_ENV) or None
+    if download_dir is not None:
+        Path(download_dir).mkdir(parents=True, exist_ok=True)
+    try:
+        return await WorkflowEnvironment.start_local(download_dest_dir=download_dir)
+    except RuntimeError:
+        pass
+    try:
+        return await WorkflowEnvironment.start_local(download_dest_dir=download_dir)
+    except RuntimeError as error:
+        _dev_server_unavailable = (
+            f"the Temporal dev server did not start after two attempts ({error})"
+        )
+    pytest.skip(_dev_server_unavailable)
 
 
 @pytest_asyncio.fixture
 async def env() -> AsyncIterator[WorkflowEnvironment]:
-    async with await WorkflowEnvironment.start_local() as environment:
+    async with await _start_dev_server() as environment:
         yield environment
 
 

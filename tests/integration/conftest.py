@@ -28,6 +28,16 @@ import pytest
 # own ``@pytest.mark.timeout`` always wins.
 INTEGRATION_TIMEOUT_SECONDS = 300
 
+# The "short" ttl, in seconds, the live PostgreSQL checkpointer suites save
+# with when a case waits for a checkpoint to expire. The first save on a fresh
+# table opens the connection and runs the DDL under an advisory lock, and the
+# expiry is stamped before that work starts, so a sub-second ttl can run out
+# on a loaded runner before the asserts read the row back (#565). In-memory
+# and local key-value stores keep the conformance suite's fast default
+# (``SHORT_TTL`` in ``tests/unit/checkpointer_time_travel_conformance.py``);
+# a PostgreSQL class or case uses this one value instead of its own literal.
+POSTGRES_SHORT_TTL = 1.5
+
 
 # =============================================================================
 # Service Detection Helpers
