@@ -28,6 +28,8 @@ from locus.router import (
     builtin_protocols,
 )
 from locus.router.benchmark import (
+    DIFFICULTIES,
+    DIFFICULTY_TAG_PREFIX,
     REFUSED,
     TAG_ADVERSARIAL,
     TAG_AMBIGUOUS,
@@ -38,6 +40,7 @@ from locus.router.benchmark import (
     FreeFormSelectionTarget,
     SelectionTarget,
     TypedSelectionTarget,
+    benchmark_compiler,
     frame_extractor,
     freeform_target,
     is_transient_error,
@@ -86,7 +89,7 @@ def _labelled(name: str = "a", shape: str = "debate", **extra: Any) -> dict[str,
     case: dict[str, Any] = {
         "name": name,
         "prompt": "Compare A with B.",
-        "tags": [TAG_LABELLED, f"shape:{shape}"],
+        "tags": [TAG_LABELLED, f"shape:{shape}", "difficulty:medium"],
         "expected_output_contains": [shape],
     }
     case.update(extra)
@@ -139,12 +142,13 @@ def test_the_shipped_corpus_loads_with_the_published_shape() -> None:
     labelled = [c for c in cases if TAG_LABELLED in c.tags]
     adversarial = [c for c in cases if TAG_ADVERSARIAL in c.tags]
 
-    assert len(cases) == 64
-    assert len(labelled) == 46
+    assert len(cases) == 198
+    assert len(labelled) == 180
     assert len(adversarial) == 18
     assert sum(TAG_INJECTION in c.tags for c in adversarial) == 8
     assert sum(TAG_AMBIGUOUS in c.tags for c in adversarial) == 10
-    assert len({c.name for c in cases}) == 64
+    assert len({c.name for c in cases}) == 198
+    assert len({c.prompt for c in cases}) == 198
     for case in labelled:
         assert case.expected_output_contains[0] in REGISTERED
         assert case.metadata["expected_goal"] in {t.value for t in TaskType}
@@ -153,8 +157,8 @@ def test_the_shipped_corpus_loads_with_the_published_shape() -> None:
     assert {c.expected_output_contains[0] for c in labelled} == REGISTERED - {"a2a_delegate"}
 
 
-def test_every_goal_in_the_shipped_corpus_has_at_least_three_labelled_cases() -> None:
-    """A per-goal row of the benchmark table needs more than one or two prompts behind it."""
+def test_every_goal_in_the_shipped_corpus_has_thirteen_or_more_labelled_cases() -> None:
+    """A per-goal row of the benchmark table needs enough prompts to read a rate from."""
     per_goal: dict[str, int] = {}
     for case in load_router_corpus(CORPUS):
         if TAG_LABELLED not in case.tags:
@@ -163,26 +167,73 @@ def test_every_goal_in_the_shipped_corpus_has_at_least_three_labelled_cases() ->
             if tag.startswith("goal:"):
                 per_goal[tag] = per_goal.get(tag, 0) + 1
 
-    assert per_goal
-    assert {goal: n for goal, n in per_goal.items() if n < 3} == {}
+    assert set(per_goal) == {f"goal:{t.value}" for t in TaskType}
+    assert {goal: n for goal, n in per_goal.items() if n < 13} == {}
 
 
-def test_the_traps_are_research_prompts_labelled_direct_response() -> None:
+def test_the_shipped_corpus_covers_every_difficulty() -> None:
+    labelled = [c for c in load_router_corpus(CORPUS) if TAG_LABELLED in c.tags]
+    per_level = {
+        level: sum(f"{DIFFICULTY_TAG_PREFIX}{level}" in c.tags for c in labelled)
+        for level in DIFFICULTIES
+    }
+
+    assert per_level == {"low": 50, "medium": 100, "high": 30}
+
+
+def test_the_traps_are_one_step_prompts_under_an_expensive_verb() -> None:
+    """Twenty-six traps: the verb's canonical shape costs more than the work needs."""
     traps = [c for c in load_router_corpus(CORPUS) if TAG_TRAP in c.tags]
+    canonical_cost = {
+        goal: protocol.cost for protocol in builtin_protocols() for goal in protocol.primary_for
+    }
 
-    assert len(traps) == 2
+    assert len(traps) == 26
     for case in traps:
         assert case.expected_output_contains == ["direct_response"]
-        assert "goal:research" in case.tags
+        assert "difficulty:low" in case.tags
+        goal = TaskType(case.metadata["expected_goal"])
+        assert canonical_cost[goal] != "low", case.name
+    per_goal: dict[str, int] = {}
+    for case in traps:
+        per_goal[case.metadata["expected_goal"]] = (
+            per_goal.get(case.metadata["expected_goal"], 0) + 1
+        )
+    assert len(per_goal) == 9
+    assert min(per_goal.values()) >= 2
+
+
+def test_every_label_is_what_the_compiler_selects_for_the_intended_frame() -> None:
+    """A label is derivable: the frame the author states resolves to the labelled shape."""
+    compiler = benchmark_compiler(None)
+    for case in load_router_corpus(CORPUS):
+        if TAG_LABELLED not in case.tags:
+            continue
+        meta = case.metadata
+        assert f"{DIFFICULTY_TAG_PREFIX}{meta['expected_complexity']}" in case.tags, case.name
+        frame = GoalFrame(
+            primary_goal=TaskType(meta["expected_goal"]),
+            domain=meta["domain"],
+            complexity=Complexity(meta["expected_complexity"]),
+            risk=Risk(meta["expected_risk"]),
+            required_capabilities=list(meta.get("capabilities", [])),
+        )
+        selected = compiler.explain(frame, goal=case.prompt).selected_protocol
+        assert [selected] == case.expected_output_contains, case.name
 
 
 def test_a_labelled_case_must_name_one_registered_shape(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="exactly one shape:"):
-        load_router_corpus(_write(tmp_path, [_labelled(tags=[TAG_LABELLED])]))
+        load_router_corpus(_write(tmp_path, [_labelled(tags=[TAG_LABELLED, "difficulty:low"])]))
     with pytest.raises(ValueError, match="exactly one shape:"):
         load_router_corpus(
             _write(
-                tmp_path, [_labelled(tags=[TAG_LABELLED, "shape:debate", "shape:handoff_chain"])]
+                tmp_path,
+                [
+                    _labelled(
+                        tags=[TAG_LABELLED, "shape:debate", "shape:handoff_chain", "difficulty:low"]
+                    )
+                ],
             )
         )
     with pytest.raises(ValueError, match="unregistered protocol 'meta'"):
@@ -194,10 +245,31 @@ def test_a_labelled_case_must_name_one_registered_shape(tmp_path: Path) -> None:
 def test_a_trap_is_labelled_with_a_low_cost_shape(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="trap, so its shape must be low-cost"):
         load_router_corpus(
-            _write(tmp_path, [_labelled(tags=[TAG_LABELLED, TAG_TRAP, "shape:debate"])])
+            _write(
+                tmp_path,
+                [_labelled(tags=[TAG_LABELLED, TAG_TRAP, "shape:debate", "difficulty:low"])],
+            )
         )
-    ok = _labelled(shape="direct_response", tags=[TAG_LABELLED, TAG_TRAP, "shape:direct_response"])
+    direct = [TAG_LABELLED, TAG_TRAP, "shape:direct_response"]
+    with pytest.raises(ValueError, match="trap, so its difficulty must be low"):
+        load_router_corpus(
+            _write(
+                tmp_path,
+                [_labelled(shape="direct_response", tags=[*direct, "difficulty:medium"])],
+            )
+        )
+    ok = _labelled(shape="direct_response", tags=[*direct, "difficulty:low"])
     assert load_router_corpus(_write(tmp_path, [ok]))[0].tags[1] == TAG_TRAP
+
+
+def test_a_labelled_case_states_one_known_difficulty(tmp_path: Path) -> None:
+    for tags in (
+        [TAG_LABELLED, "shape:debate"],
+        [TAG_LABELLED, "shape:debate", "difficulty:low", "difficulty:high"],
+        [TAG_LABELLED, "shape:debate", "difficulty:extreme"],
+    ):
+        with pytest.raises(ValueError, match="exactly one difficulty:<level> tag"):
+            load_router_corpus(_write(tmp_path, [_labelled(tags=tags)]))
 
 
 def test_an_adversarial_case_expects_only_boundedness(tmp_path: Path) -> None:
@@ -366,13 +438,13 @@ def _cases() -> list[EvalCase]:
         EvalCase(
             name="compare",
             prompt="Compare A with B.",
-            tags=[TAG_LABELLED, "shape:debate"],
+            tags=[TAG_LABELLED, "shape:debate", "difficulty:medium"],
             expected_output_contains=["debate"],
         ),
         EvalCase(
             name="lookup",
             prompt="Look up X.",
-            tags=[TAG_LABELLED, TAG_TRAP, "shape:direct_response"],
+            tags=[TAG_LABELLED, TAG_TRAP, "shape:direct_response", "difficulty:low"],
             expected_output_contains=["direct_response"],
         ),
         EvalCase(
@@ -467,6 +539,10 @@ def test_the_tag_table_puts_the_whole_corpus_first_then_the_tags() -> None:
     assert table[0] == "| tag | n | typed | freeform |"
     assert table[2] == "| all | 3 | 100.0% (100.0%) | 33.3% (33.3%) |"
     assert "| trap | 1 | 100.0% (100.0%) | 0.0% (0.0%) |" in table
+    tags = [row.split(" | ")[0].removeprefix("| ") for row in table[2:]]
+    assert tags[:5] == ["all", "labelled", "trap", "adversarial", "injection"]
+    assert tags[5:7] == ["difficulty:low", "difficulty:medium"]
+    assert tags[7].startswith("shape:")
     assert "| shape:debate | 1 | 100.0% (100.0%) | 0.0% (0.0%) |" in table
 
 
