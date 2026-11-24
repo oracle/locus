@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`agent.tokens.used` is published.** The constant was declared and
+  documented as never emitted: the bridge mapped it only from
+  `ModelCompleteEvent`, which the agent loop never yields, so the online
+  evaluator's token total and every cost subscriber on the bus read zero. The
+  bridge now publishes it once per run from the terminate event's cumulative
+  usage (`prompt_tokens`, `completion_tokens`, `total_tokens`,
+  `scope="run"`) when the provider metered the run; the per-call shape
+  carries `scope="call"`. An unmetered run still publishes no counts.
+
 ## [6.5.2] - 2026-11-24
 
 ### Fixed

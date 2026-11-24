@@ -10,10 +10,10 @@
     bridged events       ThinkEvent         -> agent.think, once per loop iteration           (runtime_loop.py:1119, 2154; agent_bridge.py:95-102)
                          ToolStartEvent     -> agent.tool.started, span_id = tool_call_id    (runtime_loop.py:1401; agent_bridge.py:103-109)
                          ToolCompleteEvent  -> agent.tool.completed, the same span_id        (runtime_loop.py:1573-1831 via _complete_event; agent_bridge.py:110-119)
-                         ModelCompleteEvent -> agent.tokens.used, only when it carries usage; the agent loop never yields one (agent_bridge.py:144-159)
-                                               dashed: Agent.run has no yield site for ModelCompleteEvent, so the
-                                               agent path records the other four and not this one
-                         TerminateEvent     -> agent.terminate with reason + iterations_used (runtime_loop.py:857-1909; agent_bridge.py:177-185)
+                         TerminateEvent     -> agent.terminate with reason + iterations_used, then agent.tokens.used
+                                               (scope="run") with the run's cumulative usage when the provider metered it
+                                               (runtime_loop.py:857-1909; agent_bridge.py:181-203). ModelCompleteEvent would map
+                                               to agent.tokens.used (scope="call") too, but the agent loop never yields one.
     emit()               returns after one ContextVar.get() when no run_id is bound; otherwise
                          awaits bus.publish(StreamEvent(run_id, event_type, data))    (emit.py:150-182; context.py:73-80)
     EventBus.publish     appends to the per-run history deque, then delivers to the run's and the
@@ -26,7 +26,7 @@
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 436" role="img" aria-labelledby="title desc">
   <title id="title">What run_context() switches on</title>
-  <desc id="desc">Entering run_context() mints a run_id and binds it to the asyncio context; agent.arun() is called inside that block. The agent loop yields LocusEvents, and the bus bridge turns them into the canonical events agent.think (once per iteration), agent.tool.started and agent.tool.completed (a pair sharing one span_id, the tool_call_id), agent.tokens.used (mapped from a ModelCompleteEvent carrying usage, which the agent loop does not yield, so it never fires on this path) and agent.terminate (stop reason and iterations used). Each is published through emit() onto the EventBus, which appends it to a per-run history deque and fans it out to subscribers. bus.subscribe(rid) replays that history first, then streams live events until close_stream(rid) ends the iterator. Outside run_context(), emit() returns after a single ContextVar lookup: no bus is built and no event is created.</desc>
+  <desc id="desc">Entering run_context() mints a run_id and binds it to the asyncio context; agent.arun() is called inside that block. The agent loop yields LocusEvents, and the bus bridge turns them into the canonical events agent.think (once per iteration), agent.tool.started and agent.tool.completed (a pair sharing one span_id, the tool_call_id), agent.terminate (stop reason and iterations used) and agent.tokens.used (the run's cumulative usage, bridged from the same terminate event when the provider metered the run). Each is published through emit() onto the EventBus, which appends it to a per-run history deque and fans it out to subscribers. bus.subscribe(rid) replays that history first, then streams live events until close_stream(rid) ends the iterator. Outside run_context(), emit() returns after a single ContextVar lookup: no bus is built and no event is created.</desc>
   <defs>
     <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
@@ -53,10 +53,10 @@
     <text x="450" y="201">agent.tool.completed</text>
     <text class="sub" x="450" y="222">same span_id</text>
   </g>
-  <g class="node optional">
+  <g class="node">
     <rect x="330" y="246" width="240" height="50" rx="12"/>
     <text x="450" y="261">agent.tokens.used</text>
-    <text class="sub" x="450" y="282">from ModelCompleteEvent usage</text>
+    <text class="sub" x="450" y="282">run totals, from TerminateEvent usage</text>
   </g>
   <g class="node">
     <rect x="330" y="306" width="240" height="50" rx="12"/>
@@ -118,5 +118,5 @@
   </g>
 
   <text class="note" x="450" y="400">Outside run_context(), emit() returns after one ContextVar.get(): no bus, no StreamEvent, no allocation.</text>
-  <text class="note" x="450" y="418">Dashed: agent.tokens.used maps from a ModelCompleteEvent with usage; the agent loop never yields one.</text>
+  <text class="note" x="450" y="418">agent.tokens.used is published once per run, after agent.terminate, only when the provider metered the run.</text>
 </svg>

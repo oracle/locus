@@ -593,9 +593,9 @@ bus as a canonical `agent.*` event — no hook registration, no config flag:
 | `ReflectEvent` | `agent.reflect` |
 | `GroundingEvent` | `agent.grounding` |
 | `ModelChunkEvent` | `agent.model.chunk` (only with `run(..., stream_tokens=True)`) |
-| `ModelCompleteEvent` | `agent.model.completed` + `agent.tokens.used` — mapped, but never fires: the loop does not yield `ModelCompleteEvent` (see [Events](events.md#modelcompleteevent)) |
+| `ModelCompleteEvent` | `agent.model.completed` + `agent.tokens.used` (`scope="call"`) — mapped, but never fires: the loop does not yield `ModelCompleteEvent` (see [Events](events.md#modelcompleteevent)) |
 | `InterruptEvent` | `agent.interrupt` (human-in-the-loop pause) |
-| `TerminateEvent` | `agent.terminate` |
+| `TerminateEvent` | `agent.terminate`, plus `agent.tokens.used` (`scope="run"`) with the run's cumulative usage when the provider metered it |
 | `CompactionEvent` | `agent.context.compacted` (stage, tokens before/after) |
 
 `span_id` on started/completed pairs lets consumers compute durations and
