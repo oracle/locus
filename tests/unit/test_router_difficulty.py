@@ -14,17 +14,32 @@ import pytest
 
 from locus.evaluation import EvalCase, EvalReport, EvalRunner
 from locus.evaluation.judge import Verdict
-from locus.router.benchmark import TAG_ADVERSARIAL, TAG_LABELLED, TAG_TRAP, load_router_corpus
+from locus.router import Complexity, Risk, TaskType
+from locus.router.benchmark import (
+    TAG_ADVERSARIAL,
+    TAG_LABELLED,
+    TAG_TRAP,
+    load_router_corpus,
+    typed_target,
+)
 from locus.router.difficulty import (
     ANSWER_RUBRIC,
     NOT_MEASURED,
+    WORLD_ALERTS,
+    WORLD_METRICS,
+    IntendedFrameClassifier,
     MeasuredDifficulty,
+    ShapeAgent,
     answer_cases,
     confusion_table,
     direct_agent,
     disagreements,
     intended_difficulty,
+    intended_frame,
     measure_difficulty,
+    shape_rubric,
+    working_capabilities,
+    world_summary,
 )
 from locus.testing import ScriptedModel, text
 
@@ -197,6 +212,110 @@ def test_the_confusion_table_counts_intended_against_measured() -> None:
     assert table[4] == "| high | 1 | 0 | 0 | 1 | 0 |"
     assert table[5] == "| trap | 2 | 1 | 1 | 0 | 0 |"
     assert [m.case for m in disagreements(measured)] == ["b", "c"]
+
+
+# ------------------------------------------------------------- shape tier --
+
+
+def _tool(index: Any, capability: str) -> Any:
+    return index.resolve_tool(index.lookup([capability])[0])
+
+
+def test_the_working_tools_answer_from_one_fixed_world() -> None:
+    index = working_capabilities()
+    ids = {c.id for c in index.all()}
+    assert ids == {"kb_search", "metric_probe", "alert_list"}
+
+    summary = world_summary()
+    assert all(name in summary for name in WORLD_METRICS)
+    assert all(alert in summary for alert in WORLD_ALERTS)
+    assert "Cache stampede runbook" in summary
+    # The judge of a shape answer is given the world the tools read.
+    assert shape_rubric().startswith(ANSWER_RUBRIC)
+    assert summary in shape_rubric()
+
+
+async def test_the_working_tools_return_what_the_world_holds() -> None:
+    index = working_capabilities()
+
+    metric = await _tool(index, "metric_probe").execute(name="latency_p99")
+    assert metric.startswith("latency_p99: 1840 ms on checkout")
+    spaced = await _tool(index, "metric_probe").execute(name="replication lag")
+    assert spaced.startswith("replication_lag:")
+    unknown = await _tool(index, "metric_probe").execute(name="unicorns")
+    assert unknown.startswith("No metric named 'unicorns'. Known metrics: cpu,")
+
+    alerts = await _tool(index, "alert_list").execute()
+    assert alerts.splitlines() == list(WORLD_ALERTS)
+
+    hit = await _tool(index, "kb_search").execute(query="how did we handle cache stampedes")
+    assert hit.startswith("Cache stampede runbook:")
+    miss = await _tool(index, "kb_search").execute(query="zebra")
+    assert miss == "No knowledge-base article matches 'zebra'."
+
+
+def test_every_metric_the_corpus_names_is_in_the_world() -> None:
+    import re
+
+    named: set[str] = set()
+    for case in load_router_corpus(CORPUS):
+        if case.metadata.get("capabilities"):
+            named.update(re.findall(r"\b[a-z0-9]+_[a-z0-9_]+\b", case.prompt))
+
+    assert named
+    assert named - set(WORLD_METRICS) == set()
+
+
+async def test_the_intended_frame_classifier_is_the_corpus_ceiling() -> None:
+    corpus = load_router_corpus(CORPUS)
+    labelled = [c for c in corpus if TAG_LABELLED in c.tags]
+    classifier = IntendedFrameClassifier(corpus)
+
+    frame = await classifier.classify("Compare 3 and 7: which is larger?")
+    assert (frame.primary_goal, frame.complexity, frame.risk) == (
+        TaskType.COMPARE,
+        Complexity.LOW,
+        Risk.LOW,
+    )
+    assert intended_frame(labelled[0]).primary_goal is TaskType.ANSWER
+    with pytest.raises(LookupError, match="states no frame"):
+        await classifier.classify("Hi.")
+
+    # Through the typed target it selects the labelled protocol for every labelled prompt.
+    target = typed_target(None, classifier=classifier)
+    report = await EvalRunner(target).arun(labelled)
+    assert report.passed == len(labelled) == 180
+
+
+async def test_the_shape_agent_runs_the_labelled_shape_under_the_intended_frame() -> None:
+    cases = [
+        _case("easy", "low", expected_goal="answer", expected_complexity="low", expected_risk="low")
+    ]
+    agent = ShapeAgent(ScriptedModel([text("Port 5432.")]), cases)
+
+    result = await agent.arun("prompt of easy")
+
+    assert result.message == "Port 5432."
+    assert result.protocol_id == "direct_response"
+
+
+async def test_a_request_the_gate_holds_is_answered_as_not_executed() -> None:
+    cases = [
+        _case(
+            "risky",
+            "medium",
+            expected_goal="remediate",
+            expected_complexity="medium",
+            expected_risk="high",
+        )
+    ]
+    agent = ShapeAgent(ScriptedModel([text("Restarted.")]), cases)
+
+    result = await agent.arun("prompt of risky")
+
+    assert result.protocol_id == "approval_gated_execution"
+    assert result.message.startswith("Not executed: the request was held by policy")
+    assert "Restarted" not in result.message
 
 
 class _FlakyTier(_Tier):

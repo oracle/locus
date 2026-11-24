@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.6.0] - 2026-11-24
+
 ### Added
 
 - **Difficulty measured from outcomes for the router corpus.**
@@ -22,6 +24,17 @@ policy.
   `disagreements` lists the cases where they differ.
   `scripts/router_difficulty.py` runs it and writes the measurement as JSON
   (#342).
+- **The structured shape as a difficulty tier.** `scripts/router_difficulty.py
+  --shape <model>` runs each prompt no single reply passed on the protocol
+  its label names, as the last tier, so `medium` (a stronger reply or the
+  shape completes it) separates from `high` (nothing does).
+  `locus.router.difficulty` gains `ShapeAgent`, which dispatches under the
+  frame the corpus states; `IntendedFrameClassifier`, that frame as a
+  `RequestClassifier` and the ceiling of the selection benchmark;
+  `working_capabilities`, the corpus's three capabilities as tools over one
+  fixed set of articles, metric readings and alerts; and `shape_rubric`,
+  which gives the judge that data. A request the policy gate holds for
+  approval is answered as not executed (#342).
 - **The model catalogue knows the GPT-5.6 and GPT-6 generations.**
   `locus.models.metadata` seeds `gpt-5.6-luna`, `gpt-5.6-sol`,
   `gpt-5.6-terra`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-6.1-sol`,
