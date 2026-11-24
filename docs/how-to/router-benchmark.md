@@ -189,6 +189,80 @@ produced it. The pull-request pipeline has no model credential; the gate
 belongs to a scheduled job that runs the suite, puts the reports in a store
 and posts the Markdown.
 
+## 6. Difficulty from outcomes
+
+The `difficulty:` tag is the author's reading of a prompt.
+`locus.router.difficulty` measures it instead. Every labelled prompt is
+answered in one reply, with no tools, by models of increasing strength (the
+tiers), and a judge grades each answer against one rubric: the reply, on
+its own, completes what the request asks for. The level is read from which
+tier passes:
+
+| Measured | Meaning |
+|---|---|
+| `low` | the cheapest tier's single reply does the work |
+| `medium` | only a stronger tier's single reply does |
+| `high` | no tier's single reply does: the request needs tools, several steps, a check or an approval |
+| `not_measured` | a tier was not graded for the case (the judge abstained, the answer errored) and no graded tier settled it |
+
+```bash
+python scripts/router_difficulty.py \
+  --tiers oci:<small-model> oci:<large-model> --judge oci:<judge-model> --repeats 3
+```
+
+The tiers are given cheapest first, two or more. The judge should be none
+of them: a model grading its own answer measures self-consistency. With
+three readings a tier passes a case only when every reading passed. The
+script stores one report per tier (`router-difficulty-<tier>` suites in the
+report store), prints the intended level against the measured one with the
+traps on a row of their own, lists the cases where the two differ, and
+writes the measurement as JSON with `--out`.
+
+```python
+import asyncio
+
+from locus.evaluation import EvalRunner, LLMJudge
+from locus.models import get_model
+from locus.router.benchmark import load_router_corpus
+from locus.router.difficulty import (
+    answer_cases,
+    confusion_table,
+    direct_agent,
+    disagreements,
+    measure_difficulty,
+)
+
+cases = answer_cases(load_router_corpus("benchmarks/router/cases.json"))
+judge = LLMJudge(get_model("{{ locus_example_model }}"))
+
+
+async def measure() -> None:
+    reports = {}
+    for tier in ("oci:<small-model>", "oci:<large-model>"):
+        runner = EvalRunner(direct_agent(get_model(tier)), judge=judge, repeats=3)
+        reports[tier] = await runner.arun(cases)
+    measured = measure_difficulty(cases, reports)
+    print(confusion_table(measured))
+    for item in disagreements(measured):
+        print(item.case, item.intended, "->", item.measured)
+
+
+asyncio.run(measure())
+```
+
+Three things to keep in mind when reading a measurement:
+
+- **It is per model family.** The same prompt can be `low` on one ladder of
+  tiers and `medium` on another, so a measurement names its tiers and its
+  judge, and is taken again when they change.
+- **`high` means one reply is not enough, whatever the reason.** A prompt
+  that asks for a metric to be read is `high` because a reply cannot read
+  one, not because the reasoning is hard. What a request needs (tools,
+  several agents, an approval) is a separate part of the frame.
+- **A case can carry its own rubric.** `metadata["answer_rubric"]` on a
+  case replaces the shared criterion for that prompt, for a request whose
+  right answer is specific enough to state.
+
 ## From Python
 
 ```python
