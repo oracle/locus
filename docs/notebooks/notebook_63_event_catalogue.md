@@ -34,10 +34,8 @@ The `router.*` events are not in the registry: the helpers in
 `locus.observability.router_events` publish them as string literals
 under the run id that `Router.dispatch` binds, so they do not appear in
 the printed list. And the registry is neither a superset nor a subset of
-what the code publishes. Five names (`multiagent.graph.node.routed`,
-`a2a.task.processing`, `rag.embedding.generated`, `rag.store.upsert` and
-`rag.store.search`) are declared but never emitted
-(`memory.conversation.added` was a sixth and is deprecated), and
+what the code publishes. `memory.conversation.added` was declared but
+never emitted and is deprecated, and
 `agent.tokens.used` is emitted only for a `ModelCompleteEvent` that
 `Agent.run()` never yields. In the other direction, `EventBusHook` and
 the long-term memory managers publish some names as string literals,

@@ -110,6 +110,7 @@ run id is bound, either by an active `run_context()` or by
 | `multiagent.handoff.completed` | `source_agent_id`, `target_agent_id`, `success`, `output_length` |
 | `multiagent.graph.node.started` | `graph_id`, `node_id`, `iteration`, `span_id`, `parallel`, `is_resuming` |
 | `multiagent.graph.node.completed` | `graph_id`, `node_id`, `span_id`, `status`, `duration_ms`, `parallel` |
+| `multiagent.graph.node.routed` | `graph_id`, `node_id` (the node the decision leaves), `targets` (the node ids the run goes to next, the end marker `__END__` included), `iteration`, `source` (`"conditional_edge"` \| `"command"`) |
 
 ### `composition.*` — pipelines
 
@@ -153,6 +154,9 @@ a hold for human approval, and `allow: true` alone is an allow.
 | Event | Payload |
 |---|---|
 | `rag.query.started` | `query_preview`, `limit`, `store_type`, `threshold` |
+| `rag.embedding.generated` | `embedder_type`, `count` (texts embedded by the call), `dimension`, `purpose` (`"query"` \| `"documents"`) |
+| `rag.store.search` | `store_type`, `limit` (what the store was asked for: the reranker's candidate pool when one is set), `hit_count` (before any rerank), `hybrid` (true only when the blended search ran) |
+| `rag.store.upsert` | `store_type`, `doc_id` (the parent id of a chunked document), `chunk_count` |
 | `rag.query.completed` | `hit_count`, `top_score`, `duration_ms`, `store_type`, `reranker_type`, `success`, `error` (when `success` is false; `hit_count` is 0) |
 
 ### `memory.*` — checkpointing, conversation management, long-term memory
@@ -188,6 +192,7 @@ returns. Like every `emit()` site, a no-op without a bound run id.
 | Event | Payload |
 |---|---|
 | `a2a.task.received` | `method`, `rpc_id` (the flat `/a2a/invoke` and `/a2a/stream` routes report `a2a/invoke` / `a2a/stream` and a null `rpc_id`) |
+| `a2a.task.processing` | `task_id`, `context_id`, `resumed` (true when the task continues after an interrupt) |
 | `a2a.task.completed` | `method`, `success`, `error_code` (on a protocol or internal error; absent when a streaming client left mid-stream), `duration_ms` |
 | `a2a.client.send` | `target_url`, `method`, `binding` (from the v1 transports) |
 | `a2a.client.received` | `target_url`, `method`, `binding` (from the v1 transports), `status_code` (null when no response arrived; the gRPC status on the gRPC binding, 0 for OK), `duration_ms`, `content_length` (one-shot calls) or `frames` (streaming methods: the frames the stream yielded, also when the consumer stopped reading early), `error` (the exception type when the call failed in transit, `HTTPStatusError` for an error status, the gRPC status name on the gRPC binding) |
@@ -268,18 +273,13 @@ without storing either.
 
 ## Declared but not emitted
 
-Five constants in `src/locus/observability/emit.py` have no emission site
-today, so a subscriber never sees them: `EV_A2A_TASK_PROCESSING`
-(`a2a.task.processing`), `EV_GRAPH_NODE_ROUTED`
-(`multiagent.graph.node.routed`), `EV_RAG_EMBEDDING_GENERATED`
-(`rag.embedding.generated`), `EV_RAG_STORE_SEARCH` (`rag.store.search`)
-and `EV_RAG_STORE_UPSERT` (`rag.store.upsert`). The unit test
-`tests/unit/test_emit_constants_have_sites.py` carries the same list and
-fails when a constant gains or loses an emission site without this page
-following.
+Every constant in `src/locus/observability/emit.py` has an emission site
+today. The unit test `tests/unit/test_emit_constants_have_sites.py` fails
+when a constant is added without one or loses the one it had, unless the
+constant is listed there and on this page.
 
 `EV_MEMORY_CONVERSATION_ADDED` (`memory.conversation.added`) was declared
-and never emitted either, and nothing in the SDK adds to a conversation
+and never emitted, and nothing in the SDK adds to a conversation
 outside the agent loop, whose own events show every turn. It is deprecated:
 importing it still returns the string with a `LocusDeprecationWarning`, and
 it is removed in 7.0.0.

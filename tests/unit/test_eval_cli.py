@@ -268,10 +268,17 @@ def test_usage_errors_are_reported_without_a_traceback(
     assert "cannot read report" in capsys.readouterr().err
 
 
+@pytest.fixture(params=["directory", "sqlite"])
+def store(request: pytest.FixtureRequest, tmp_path: Path) -> str:
+    """A ``--store`` spec: a bare directory, and a SQLite file."""
+    if request.param == "directory":
+        return str(tmp_path / "reports")
+    return f"sqlite://{tmp_path}/reports.db"
+
+
 def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
-    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    app: Path, cases: Path, tmp_path: Path, store: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    store = tmp_path / "reports"
     for maker in ("make", "make", "make_no"):
         main(
             [
@@ -288,7 +295,10 @@ def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
         )
     out = capsys.readouterr().out
     assert "stored under suite 'cases'" in out
-    assert len(list((store / "cases").glob("*.json"))) == 3
+    if store.startswith("sqlite://"):
+        assert (tmp_path / "reports.db").is_file()
+    else:
+        assert len(list((tmp_path / "reports" / "cases").glob("*.json"))) == 3
 
     code = main(["eval", "trend", "--store", str(store), "--suite", "cases", "--last", "5"])
     out = capsys.readouterr().out
@@ -302,9 +312,8 @@ def test_run_keeps_the_report_in_a_store_and_trend_reads_it_back(
 
 
 def test_trend_exits_one_when_the_newest_report_regressed(
-    app: Path, cases: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    app: Path, cases: Path, tmp_path: Path, store: str, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    store = tmp_path / "reports"
     smoke = tmp_path / "smoke.json"
     smoke.write_text(json.dumps([_CASES[0]]), encoding="utf-8")
     main(

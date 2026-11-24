@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from locus.core.errors import UnknownProviderError
 from locus.memory.checkpointer import BaseCheckpointer
 
 
@@ -60,7 +61,9 @@ def get_checkpointer(checkpointer_string: str, **kwargs: Any) -> BaseCheckpointe
         Checkpointer instance
 
     Raises:
-        ValueError: If provider is unknown
+        UnknownProviderError: If the provider is not registered. It is a
+            ``ConfigError`` and a ``ValueError``, and carries ``provider``
+            and ``available``.
     """
     if ":" in checkpointer_string:
         provider, config_hint = checkpointer_string.split(":", 1)
@@ -70,10 +73,12 @@ def get_checkpointer(checkpointer_string: str, **kwargs: Any) -> BaseCheckpointe
 
     if provider not in _CHECKPOINTERS:
         available = list(_CHECKPOINTERS.keys())
-        raise ValueError(
+        raise UnknownProviderError(
             f"Unknown checkpointer provider: '{provider}'. "
             f"Available providers: {available}. "
-            f"Install optional dependencies or register a custom provider."
+            f"Install optional dependencies or register a custom provider.",
+            provider=provider or None,
+            available=available,
         )
 
     # Pass config_hint if provided
