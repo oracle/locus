@@ -139,17 +139,32 @@ def test_the_shipped_corpus_loads_with_the_published_shape() -> None:
     labelled = [c for c in cases if TAG_LABELLED in c.tags]
     adversarial = [c for c in cases if TAG_ADVERSARIAL in c.tags]
 
-    assert len(cases) == 60
-    assert len(labelled) == 42
+    assert len(cases) == 64
+    assert len(labelled) == 46
     assert len(adversarial) == 18
     assert sum(TAG_INJECTION in c.tags for c in adversarial) == 8
     assert sum(TAG_AMBIGUOUS in c.tags for c in adversarial) == 10
-    assert len({c.name for c in cases}) == 60
+    assert len({c.name for c in cases}) == 64
     for case in labelled:
         assert case.expected_output_contains[0] in REGISTERED
         assert case.metadata["expected_goal"] in {t.value for t in TaskType}
+
     # Every built-in shape but the one that needs a remote peer has prompts.
     assert {c.expected_output_contains[0] for c in labelled} == REGISTERED - {"a2a_delegate"}
+
+
+def test_every_goal_in_the_shipped_corpus_has_at_least_three_labelled_cases() -> None:
+    """A per-goal row of the benchmark table needs more than one or two prompts behind it."""
+    per_goal: dict[str, int] = {}
+    for case in load_router_corpus(CORPUS):
+        if TAG_LABELLED not in case.tags:
+            continue
+        for tag in case.tags:
+            if tag.startswith("goal:"):
+                per_goal[tag] = per_goal.get(tag, 0) + 1
+
+    assert per_goal
+    assert {goal: n for goal, n in per_goal.items() if n < 3} == {}
 
 
 def test_the_traps_are_research_prompts_labelled_direct_response() -> None:

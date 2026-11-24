@@ -83,7 +83,7 @@ deliberately simple enough to reproduce against anything else.
 ## Router selection benchmark
 
 The one measurement here that calls a model. `router/cases.json` is the
-routing corpus as `EvalCase` objects: 42 labelled prompts tagged with the
+routing corpus as `EvalCase` objects: 46 labelled prompts tagged with the
 protocol each should reach (`shape:<id>`), two of them `trap` cases whose
 verb points at an expensive shape while the work is one step, and 18
 adversarial prompts (`injection`, `ambiguous`) scored on whether the answer

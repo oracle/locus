@@ -176,8 +176,56 @@
     }
   },
   {
+    "name": "build-03-build-a-ci-pipeline",
+    "prompt": "Build a CI pipeline for this repository: a lint stage, a unit-test stage and a package build, with a final step that verifies every stage ran.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:build"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "build",
+      "domain": "engineering"
+    }
+  },
+  {
     "name": "modify-01-modify-our-retry-policy",
     "prompt": "Modify our retry policy to add exponential backoff with jitter.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering"
+    }
+  },
+  {
+    "name": "modify-02-modify-the-rate-limiter",
+    "prompt": "Modify the checkout service's rate limiter to use a sliding window instead of a fixed window, and validate the change against the existing load test.",
+    "tags": [
+      "labelled",
+      "shape:plan_execute_validate",
+      "goal:modify"
+    ],
+    "expected_output_contains": [
+      "plan_execute_validate"
+    ],
+    "metadata": {
+      "expected_goal": "modify",
+      "domain": "engineering"
+    }
+  },
+  {
+    "name": "modify-03-update-our-logging-configuration",
+    "prompt": "Update our logging configuration so every line is structured JSON with a request id, then check that the log pipeline still parses it.",
     "tags": [
       "labelled",
       "shape:plan_execute_validate",
@@ -370,6 +418,26 @@
   {
     "name": "monitor-02-continuously-watch-for-any",
     "prompt": "Continuously watch for any new alerts and pull cpu, latency_p99, errors_5xx every minute.",
+    "tags": [
+      "labelled",
+      "shape:specialist_fanout",
+      "goal:monitor"
+    ],
+    "expected_output_contains": [
+      "specialist_fanout"
+    ],
+    "metadata": {
+      "expected_goal": "monitor",
+      "domain": "observability",
+      "capabilities": [
+        "metric_probe",
+        "alert_list"
+      ]
+    }
+  },
+  {
+    "name": "monitor-03-keep-watch-on-the",
+    "prompt": "Keep watch on the checkout service: track its error rate and p95 latency every five minutes and list any alerts that fire.",
     "tags": [
       "labelled",
       "shape:specialist_fanout",
