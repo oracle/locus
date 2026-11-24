@@ -201,8 +201,8 @@ tier passes:
 | Measured | Meaning |
 |---|---|
 | `low` | the cheapest tier's single reply does the work |
-| `medium` | only a stronger tier's single reply does |
-| `high` | no tier's single reply does: the request needs tools, several steps, a check or an approval |
+| `medium` | only a later tier does: a stronger model's single reply, or the structured shape |
+| `high` | no tier does |
 | `not_measured` | a tier was not graded for the case (the judge abstained, the answer errored) and no graded tier settled it |
 
 ```bash
@@ -250,15 +250,43 @@ async def measure() -> None:
 asyncio.run(measure())
 ```
 
+### The structured shape as the last tier
+
+A request that asks for a metric to be read fails every single reply for
+the same reason, whatever the model. `--shape` adds a tier that can do
+more: each prompt no reply passed is run on the protocol its label names,
+with tools that work.
+
+```bash
+python scripts/router_difficulty.py \
+  --tiers oci:<small-model> oci:<large-model> --shape oci:<large-model> \
+  --judge oci:<judge-model> --repeats 3
+```
+
+| Part | What it does |
+|---|---|
+| `ShapeAgent` | dispatches the prompt under the frame the corpus states (`IntendedFrameClassifier`), so the outcome measures the shape and not the routing |
+| `working_capabilities()` | `kb_search`, `get_metric` and `list_alerts` over one fixed set of articles, readings and alerts (`WORLD_ARTICLES`, `WORLD_METRICS`, `WORLD_ALERTS`) |
+| `shape_rubric()` | the answer rubric followed by that data, so the judge can tell a reading the tools returned from an invented one |
+
+With the shape as the last tier, `medium` is a prompt a stronger reply or
+the shape completes, and `high` is one nothing completes: a request for an
+action on a system the tools cannot reach, or one the policy gate holds
+for approval (the shape then answers that the request was not executed).
+
+`IntendedFrameClassifier` is also the ceiling of the selection benchmark:
+through `typed_target(model, classifier=IntendedFrameClassifier(cases))`
+every labelled prompt reaches its labelled protocol, the score a trained
+classifier approaches.
+
 Three things to keep in mind when reading a measurement:
 
 - **It is per model family.** The same prompt can be `low` on one ladder of
   tiers and `medium` on another, so a measurement names its tiers and its
   judge, and is taken again when they change.
-- **`high` means one reply is not enough, whatever the reason.** A prompt
-  that asks for a metric to be read is `high` because a reply cannot read
-  one, not because the reasoning is hard. What a request needs (tools,
-  several agents, an approval) is a separate part of the frame.
+- **Without `--shape`, `high` means one reply is not enough, whatever the
+  reason.** A prompt that asks for a metric to be read is then `high`
+  because a reply cannot read one, not because the reasoning is hard.
 - **A case can carry its own rubric.** `metadata["answer_rubric"]` on a
   case replaces the shared criterion for that prompt, for a request whose
   right answer is specific enough to state.

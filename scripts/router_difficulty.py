@@ -43,11 +43,13 @@ from locus.router.benchmark import load_router_corpus  # noqa: E402
 from locus.router.difficulty import (  # noqa: E402
     NOT_MEASURED,
     MeasuredDifficulty,
+    ShapeAgent,
     answer_cases,
     confusion_table,
     direct_agent,
     disagreements,
     measure_difficulty,
+    shape_rubric,
 )
 
 
@@ -87,6 +89,35 @@ async def _main(args: argparse.Namespace) -> tuple[list[MeasuredDifficulty], lis
         if len(errors) == report.total_cases:
             sys.exit(f"{label} answered nothing; every case failed with: {errors[0]}")
         stored = store.put(report, suite=f"router-difficulty-{label}", report_id=label)
+        print(
+            f"   {report.passed}/{report.total_cases} passed on every reading, "
+            f"{report.not_graded} not graded, {len(errors)} errored; "
+            f"stored at {stored.location}"
+        )
+
+    if args.shape:
+        # The structured shape is the last tier, run only where no single
+        # reply passed: a case a reply settles is already ``low`` or ``medium``.
+        settled = {
+            result.case_name
+            for report in reports.values()
+            for result in report.results
+            if result.passed
+        }
+        open_cases = [case for case in cases if case.name not in settled]
+        label = f"shape-{_label(args.shape)}"
+        print(f"== {label}: {len(open_cases)} cases x {args.repeats} readings", flush=True)
+        shape_model = get_model(args.shape, max_tokens=args.max_tokens)
+        runner = EvalRunner(
+            ShapeAgent(shape_model, open_cases),
+            judge=judge,
+            repeats=args.repeats,
+            concurrency=args.concurrency,
+        )
+        report = await runner.arun(answer_cases(open_cases, rubric=shape_rubric()))
+        reports[label] = report
+        stored = store.put(report, suite=f"router-difficulty-{label}", report_id=label)
+        errors = [r.error for r in report.results if r.error]
         print(
             f"   {report.passed}/{report.total_cases} passed on every reading, "
             f"{report.not_graded} not graded, {len(errors)} errored; "
@@ -133,6 +164,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--tiers", nargs="+", required=True, help="model strings, cheapest first (two or more)"
+    )
+    parser.add_argument(
+        "--shape",
+        help="a model to run each prompt's labelled shape on, with working tools, as the "
+        "last tier; only the prompts no single reply passed are run",
     )
     parser.add_argument("--judge", required=True, help="the model that grades the answers")
     parser.add_argument("--repeats", type=int, default=3, help="readings per case (default 3)")
