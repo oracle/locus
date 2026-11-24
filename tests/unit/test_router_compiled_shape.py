@@ -13,7 +13,8 @@ graph matches the **recommended locus pattern byte-for-byte**:
                             (planner / executor / validator)
     specialist_fanout     → :class:`ParallelPipeline` of N Agents,
                             one per non-human capability,
-                            each with exactly its bound tool
+                            each with exactly its bound tool,
+                            then one tool-less synthesis Agent
 
 This is the test that justifies the "bounded graph generation" claim:
 the compiler emits a known, inspectable shape — not arbitrary
