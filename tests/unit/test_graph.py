@@ -1559,3 +1559,84 @@ class TestLangGraphParityShims:
         ascii_art = compiled.draw_ascii()
         assert isinstance(ascii_art, str)
         assert ascii_art
+
+
+class TestEndIsASink:
+    """A branch that reaches END finishes; the others keep running."""
+
+    @staticmethod
+    def _recording_graph(ran: list[str], *, parallel: bool) -> StateGraph:
+        def make(name: str):
+            async def run(inputs: dict) -> dict:
+                ran.append(name)
+                return {name: True}
+
+            return run
+
+        graph = StateGraph(config=GraphConfig(parallel=parallel))
+        for name in ("a", "b", "c"):
+            graph.add_node(name, make(name))
+        graph.add_edge(START, "a")
+        graph.add_edge(START, "b")
+        graph.add_edge("a", END)  # this branch is done after one node
+        graph.add_edge("b", "c")  # this one has a node left
+        graph.add_edge("c", END)
+        return graph
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("parallel", [True, False])
+    async def test_other_branch_runs_to_its_own_end(self, parallel: bool) -> None:
+        ran: list[str] = []
+        result = await self._recording_graph(ran, parallel=parallel).execute({})
+
+        assert result.success
+        assert ran == ["a", "b", "c"]
+        assert result.execution_order == ["a", "b", "c"]
+        assert result.final_state["c"] is True
+        assert result.iterations == 2
+
+    @pytest.mark.asyncio
+    async def test_run_ends_once_every_branch_has_reached_end(self) -> None:
+        """No extra iteration is spent after the last pending node."""
+        ran: list[str] = []
+        graph = self._recording_graph(ran, parallel=True)
+        result = await graph.execute({}, config=GraphConfig(parallel=True, max_iterations=2))
+
+        assert result.success
+        assert ran == ["a", "b", "c"]
+
+    @pytest.mark.asyncio
+    async def test_conditional_edge_to_end_does_not_stop_the_other_branch(self) -> None:
+        ran: list[str] = []
+
+        def make(name: str):
+            async def run(inputs: dict) -> dict:
+                ran.append(name)
+                return {name: True}
+
+            return run
+
+        graph = StateGraph()
+        for name in ("a", "b", "c"):
+            graph.add_node(name, make(name))
+        graph.add_edge(START, "a")
+        graph.add_edge(START, "b")
+        graph.add_conditional_edges("a", lambda state: "stop", {"stop": END, "go": "c"})
+        graph.add_edge("b", "c")
+        graph.add_edge("c", END)
+
+        result = await graph.execute({})
+
+        assert result.success
+        assert ran == ["a", "b", "c"]
+
+    @pytest.mark.asyncio
+    async def test_start_to_end_alone_terminates(self) -> None:
+        graph = StateGraph()
+        graph.add_edge(START, END)
+
+        result = await graph.execute({"x": 1})
+
+        assert result.success
+        assert result.execution_order == []
+        assert result.final_state == {"x": 1}

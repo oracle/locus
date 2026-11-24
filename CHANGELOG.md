@@ -23,6 +23,16 @@ policy.
   difficulty tag on a labelled case and low difficulty on a trap, and
   `tag_table` prints a row per difficulty. A report on the earlier corpus
   has another fingerprint, so a diff across the two is refused (#342).
+## [6.5.2] - 2026-11-24
+
+### Fixed
+
+- **A branch that reaches `END` no longer ends the whole graph.** `StateGraph`
+  stopped the run as soon as any branch routed to `END`, so in a fan-out where
+  one branch finished early the other branches' remaining nodes never ran and
+  the result still reported success. `END` is now a sink: a branch that
+  reaches it is done, and the run continues while any other branch has a node
+  pending, in parallel and sequential mode alike.
 
 ## [6.5.1] - 2026-11-24
 
