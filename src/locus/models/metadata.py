@@ -496,6 +496,36 @@ for _slug, _in, _out in (
         output_price_per_mtok=_out,
     )
 
+# OpenAI GPT-5.6 and GPT-6 generations — windows, output caps and standard-tier
+# list prices as the model pages publish them (read 2026-11-24): every one takes
+# a 1,050,000-token window (922,000 of input) and returns up to 128,000 tokens.
+# Prices are the short-context rates; above 272,000 input tokens OpenAI bills
+# input at twice and output at 1.5 times these figures for the whole request,
+# which this table does not model. OCI Generative AI serves the same ids as
+# ``openai.<slug>``. ``gpt-5.6-sol``'s rate is the promotional one the page
+# lists through 2026-11-30; refresh it when the standard rate is published.
+for _slug, _in, _out in (
+    ("gpt-5.6-luna", "0.20", "1.20"),
+    ("gpt-5.6-sol", "4.00", "20.00"),
+    ("gpt-5.6-terra", "2.00", "12.00"),
+    ("gpt-6-astra", "10.00", "50.00"),
+    ("gpt-6-sol", "2.00", "10.00"),
+    ("gpt-6-luna", "0.10", "0.50"),
+    ("gpt-6.1-sol", "2.00", "10.00"),
+    ("gpt-6.1-terra", "1.00", "5.00"),
+    ("gpt-6.2-astra", "8.00", "40.00"),
+    ("gpt-6.2-sol", "2.00", "10.00"),
+):
+    _seed(
+        _slug,
+        family="openai",
+        context_length=1_050_000,
+        max_output_tokens=128_000,
+        supports_prompt_caching=True,
+        input_price_per_mtok=_in,
+        output_price_per_mtok=_out,
+    )
+
 # Anthropic, current generation — ids, windows, output caps and first-party
 # list prices as published 2026-09-25. Every one of these takes the full 1M
 # window by default and caps output at 128K, except Haiku 4.5 (200K / 64K).
