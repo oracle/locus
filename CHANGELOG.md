@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.5.1] - 2026-11-24
+
 ### Changed
 
 - **The secret scan runs gitleaks 8.30.1.** The CI pin moves from 8.21.2
