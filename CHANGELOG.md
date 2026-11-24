@@ -8,6 +8,31 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **`multiagent.graph.node.routed`.** A `StateGraph` run publishes one event
+  for every dynamic routing decision: a conditional edge that resolved, or a
+  node that returned a `Command` with `goto`. The payload is `graph_id`,
+  `node_id` (the node the decision leaves), `targets` (the node ids the run
+  goes to next, the end marker included), `iteration` and `source`
+  (`"conditional_edge"` or `"command"`). Regular edges are static and emit
+  nothing (#569, after the proposal in #600 by krisnaparahita).
+- **`a2a.task.processing`.** The A2A server publishes it each time a task
+  turns `working`, with `task_id`, `context_id` and `resumed`; a task that
+  paused on an interrupt and was resumed reports a second one with
+  `resumed` true. It is the first event on the stream that names the task,
+  and it is published before a cancelled or failed task reaches its terminal
+  status (#570, after the proposal in #601 by krisnaparahita).
+- **`rag.embedding.generated`, `rag.store.search` and `rag.store.upsert`.**
+  `RAGRetriever` reports every embedder call (`embedder_type`, `count`,
+  `dimension`, `purpose`), the store search of a query (`store_type`,
+  `limit`, `hit_count`, `hybrid`) and every write to the store (`store_type`,
+  `doc_id`, `chunk_count`), from `retrieve()` and from each ingest path:
+  `add_document()`, `add_file()`, `add_image()`, `add_audio()` and
+  `add_pdf()`. No text content is on any of them. With these five, every
+  `EV_*` constant in `locus.observability.emit` has an emit site (#571, after
+  the proposal in #607 by krisnaparahita).
+
 ## [6.4.0] - 2026-11-23
 
 ### Added

@@ -958,6 +958,20 @@ class StateGraph(BaseModel):
         # Fall back to regular edges
         return self._adjacency.get(current_node, [])
 
+    def _routing_source(self, current_node: str, command: Command | None = None) -> str | None:
+        """Name the dynamic decision ``_get_next_nodes`` takes for ``current_node``.
+
+        ``"command"`` when the node returned a ``Command`` with ``goto``,
+        ``"conditional_edge"`` when a conditional edge leaves the node, and
+        ``None`` for regular edges, which are static and decide nothing.
+        Same precedence as ``_get_next_nodes``.
+        """
+        if command and command.has_goto:
+            return "command"
+        if any(edge.source_id == current_node for edge in self.conditional_edges):
+            return "conditional_edge"
+        return None
+
     def _apply_state_update(
         self,
         current_state: dict[str, Any],
@@ -1145,6 +1159,7 @@ class StateGraph(BaseModel):
             # Lazy import — observability is opt-in.
             from locus.observability.emit import (  # noqa: PLC0415
                 EV_GRAPH_NODE_COMPLETED,
+                EV_GRAPH_NODE_ROUTED,
                 EV_GRAPH_NODE_STARTED,
                 emit,
             )
@@ -1323,6 +1338,19 @@ class StateGraph(BaseModel):
                     # Determine next nodes
                     node_next = self._get_next_nodes(node_id, state, command)
                     next_nodes.extend(node_next)
+
+                    # A conditional edge or a Command chose where the run
+                    # goes; regular edges are static and say nothing.
+                    routing_source = self._routing_source(node_id, command)
+                    if routing_source is not None:
+                        await emit(
+                            EV_GRAPH_NODE_ROUTED,
+                            graph_id=self.id,
+                            node_id=node_id,
+                            targets=[str(target) for target in node_next],
+                            iteration=iterations,
+                            source=routing_source,
+                        )
 
                 # Check for interrupt_after
                 if node_id in cfg.interrupt_after:

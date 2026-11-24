@@ -206,7 +206,7 @@ class TestStreamingRequestsCloseTheBracket:
 
         assert served.status == 200
         assert len(served.frames) >= 2
-        assert served.names == ["a2a.task.received", "a2a.task.completed"]
+        assert served.names == ["a2a.task.received", "a2a.task.processing", "a2a.task.completed"]
         completed = served.completed()
         assert completed["method"] == method
         assert completed["success"] is True
@@ -232,7 +232,7 @@ class TestStreamingRequestsCloseTheBracket:
 
         assert served.status == 200
         assert "failed" in served.frames[-1].lower()
-        assert served.names == ["a2a.task.received", "a2a.task.completed"]
+        assert served.names == ["a2a.task.received", "a2a.task.processing", "a2a.task.completed"]
         completed = served.completed()
         assert completed["method"] == method
         assert completed["success"] is True
@@ -330,7 +330,7 @@ class TestStreamingRequestsCloseTheBracket:
         await served.request(method, params, headers=headers)
 
         assert served.status == 200
-        assert served.names == ["a2a.task.received", "a2a.task.completed"]
+        assert served.names == ["a2a.task.received", "a2a.task.processing", "a2a.task.completed"]
         completed = served.completed()
         assert completed["method"] == method
         assert completed["success"] is True

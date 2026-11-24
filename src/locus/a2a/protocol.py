@@ -701,9 +701,17 @@ class A2AServer(A2AV1ServerMixin):
         task: Task,
         on_event: Callable[[Any], None] | None,
         completion: tuple[TaskState, str | None] = (TaskState.completed, None),
+        resumed: bool = False,
     ) -> str:
-        """Drive ``events`` into ``task`` until the run ends, pauses or is cancelled."""
+        """Drive ``events`` into ``task`` until the run ends, pauses or is cancelled.
+
+        ``resumed`` is true when the run continues a task that paused on an
+        interrupt; it is reported on the ``a2a.task.processing`` event.
+        """
         from locus.core.events import InterruptEvent, TerminateEvent, ThinkEvent
+
+        # Lazy import — observability is opt-in.
+        from locus.observability.emit import EV_A2A_TASK_PROCESSING, emit  # noqa: PLC0415
 
         final = ""
         task.status = TaskStatus(state=TaskState.working, timestamp=_now_iso())
@@ -711,6 +719,15 @@ class A2AServer(A2AV1ServerMixin):
             task,
             TaskStatusUpdateEvent(taskId=task.id, contextId=task.contextId, status=task.status),
             on_event,
+        )
+        # One per transition to working: a task resumed after an interrupt
+        # reports a second one. Later working updates carry reasoning text
+        # and are not transitions.
+        await emit(
+            EV_A2A_TASK_PROCESSING,
+            task_id=task.id,
+            context_id=task.contextId,
+            resumed=resumed,
         )
 
         try:
@@ -876,7 +893,9 @@ class A2AServer(A2AV1ServerMixin):
             answer, thread_id=pending.thread_id, perform_dangling=perform
         )
         try:
-            return await self._consume(events, task=task, on_event=on_event, completion=completion)
+            return await self._consume(
+                events, task=task, on_event=on_event, completion=completion, resumed=True
+            )
         except ApprovalPendingError as e:
             # The run paused again on the same undecided hold: put the task
             # back where it was so the next reply can decide it.
