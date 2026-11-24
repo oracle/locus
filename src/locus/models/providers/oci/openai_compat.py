@@ -62,6 +62,12 @@ from pydantic import Field
 
 from locus.core.loop_bound import loop_bound
 from locus.models.native.openai import OpenAIConfig, OpenAIModel
+from locus.models.providers.oci._reasoning import (
+    NO_REASONING,
+    is_no_reasoning,
+    refuses_tools_under_reasoning,
+    warn_reasoning_disabled,
+)
 
 
 if TYPE_CHECKING:
@@ -847,6 +853,50 @@ class OCIChatCompletionsModel(OpenAIModel):
             messages = wrap_tool_results_as_objects(messages)
         return messages
 
+    # --- function tools under reasoning -------------------------------------
+    # The chat endpoint refuses function tools for the gpt-5.6 and gpt-6
+    # families unless reasoning_effort is "none" (see ``_reasoning``). The
+    # first refusal is answered by sending the request again with "none";
+    # from then on the instance sends "none" whenever tools are present.
+
+    @property
+    def _reasoning_off_for_tools(self) -> bool:
+        return bool(getattr(self, "_tools_without_reasoning", False))
+
+    def _effective_reasoning_effort(self, kwargs: dict[str, Any]) -> Any:
+        if "reasoning_effort" in kwargs:
+            return kwargs["reasoning_effort"]
+        per_call = kwargs.get("extra_body") or {}
+        if "reasoning_effort" in per_call:
+            return per_call["reasoning_effort"]
+        return (self.config.extra_body or {}).get("reasoning_effort")
+
+    @staticmethod
+    def _without_reasoning(kwargs: dict[str, Any]) -> dict[str, Any]:
+        retry = {
+            **kwargs,
+            "extra_body": {**(kwargs.get("extra_body") or {}), "reasoning_effort": NO_REASONING},
+        }
+        if "reasoning_effort" in retry:
+            retry["reasoning_effort"] = NO_REASONING
+        return retry
+
+    def _retry_without_reasoning(
+        self, exc: BaseException, tools: list[dict[str, Any]] | None, kwargs: dict[str, Any]
+    ) -> bool:
+        """Whether ``exc`` is the endpoint's refusal of tools under reasoning for this request."""
+        if not tools or is_no_reasoning(self._effective_reasoning_effort(kwargs)):
+            return False
+        if getattr(exc, "status_code", None) != 400:
+            return False
+        body = getattr(exc, "body", None)
+        detail = body.get("message") if isinstance(body, dict) else None
+        if not refuses_tools_under_reasoning(detail or str(exc)):
+            return False
+        object.__setattr__(self, "_tools_without_reasoning", True)
+        warn_reasoning_disabled(self.config.model, "OCIChatCompletionsModel")
+        return True
+
     async def complete(
         self,
         messages: list[Message],
@@ -856,7 +906,14 @@ class OCIChatCompletionsModel(OpenAIModel):
         kwargs = self._munge_response_format_for_gemini(kwargs)
         tools = self._sanitize_tools_for_oci(tools)
         messages = self._prepare_messages_for_oci(messages, tools)
-        return await super().complete(messages, tools=tools, **kwargs)
+        if tools and self._reasoning_off_for_tools:
+            kwargs = self._without_reasoning(kwargs)
+        try:
+            return await super().complete(messages, tools=tools, **kwargs)
+        except Exception as exc:
+            if not self._retry_without_reasoning(exc, tools, kwargs):
+                raise
+            return await super().complete(messages, tools=tools, **self._without_reasoning(kwargs))
 
     async def stream(
         self,
@@ -879,7 +936,33 @@ class OCIChatCompletionsModel(OpenAIModel):
         kwargs = self._munge_response_format_for_gemini(kwargs)
         tools = self._sanitize_tools_for_oci(tools)
         messages = self._prepare_messages_for_oci(messages, tools)
+        if tools and self._reasoning_off_for_tools:
+            kwargs = self._without_reasoning(kwargs)
 
+        events = self._stream_oci_turn(messages, tools, kwargs)
+        try:
+            first = await events.__anext__()
+        except StopAsyncIteration:
+            return
+        except Exception as exc:
+            if not self._retry_without_reasoning(exc, tools, kwargs):
+                raise
+            async for event in self._stream_oci_turn(
+                messages, tools, self._without_reasoning(kwargs)
+            ):
+                yield event
+            return
+        yield first
+        async for event in events:
+            yield event
+
+    async def _stream_oci_turn(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]] | None,
+        kwargs: dict[str, Any],
+    ) -> AsyncIterator[ModelChunkEvent]:
+        """One streamed turn, with the structured-answer fallback described on :meth:`stream`."""
         structured = kwargs.get("response_format") is not None
         streamed_anything = False
         terminal: ModelChunkEvent | None = None
