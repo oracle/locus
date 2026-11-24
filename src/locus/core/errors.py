@@ -22,6 +22,7 @@ Sub-hierarchies correspond to subsystems:
 - :class:`RAGError` — embeddings, vector store, retrieval
 - :class:`ValidationError` — bad input at a public API boundary
 - :class:`ConfigError` — invalid or missing configuration
+  (:class:`UnknownProviderError` for a provider name no registry knows)
 
 Each subclass of :class:`LocusError` exposes a ``kind`` attribute
 (a short snake-case string) that can be used as a stable key in
@@ -30,6 +31,7 @@ structured logs and metrics, independent of the class name.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 
@@ -186,6 +188,40 @@ class ConfigError(LocusError):
     kind = "config_error"
 
 
+class UnknownProviderError(ConfigError, ValueError):
+    """A registry was asked for a provider it does not have.
+
+    Raised by :func:`locus.models.registry.get_model` for a model string
+    that is not ``provider:model`` or whose provider prefix is not
+    registered, and by :func:`locus.memory.registry.get_checkpointer` for an
+    unregistered checkpointer name. The usual cause is an optional
+    dependency that is not installed, or a typo in the prefix.
+
+    It is also a :class:`ValueError`, which is what both registries raised
+    before this class existed, so ``except ValueError`` handlers keep working.
+
+    Attributes:
+        provider: The provider name that was asked for; ``None`` when the
+            string named none (no ``provider:`` prefix, or an empty one).
+        available: The provider names registered at the time, in
+            registration order.
+    """
+
+    kind = "unknown_provider"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str | None = None,
+        available: Iterable[str] = (),
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(message, cause=cause)
+        self.provider = provider
+        self.available: list[str] = list(available)
+
+
 class GSARValidationError(LocusError):
     """A GSAR judgment did not clear the bar, and the caller asked to stop.
 
@@ -231,6 +267,7 @@ __all__ = [
     "ToolExecutionError",
     "ToolNotFoundError",
     "ToolValidationError",
+    "UnknownProviderError",
     "ValidationError",
     "VectorStoreError",
 ]

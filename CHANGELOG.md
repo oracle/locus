@@ -32,6 +32,36 @@ policy.
   `add_pdf()`. No text content is on any of them. With these five, every
   `EV_*` constant in `locus.observability.emit` has an emit site (#571, after
   the proposal in #607 by krisnaparahita).
+- **`SqliteReportStore`.** `locus.evaluation` gains a report store on one
+  SQLite database file: a local history of evaluation reports that a query
+  can read without a server. One table holds a row per report, the report as
+  JSON with its headline figures in columns, indexed on suite and on
+  timestamp. `report_store("sqlite:///var/lib/locus/evals.db")` opens it
+  (what follows `sqlite://` is the file's path), so `locus eval run --store`
+  and `locus eval trend` take it. It follows the file store: generated
+  32-hex ids, a blank id refused, newest first, the suite and fingerprint
+  filters; putting a report under an id the store already holds replaces it.
+  Each call uses its own connection, so threads and processes can write to
+  one file (#539, after the proposal in #599 by drawliin).
+- **`UnknownProviderError`.** `get_model` and `get_checkpointer` raise a
+  typed error for a provider that is not registered and, for `get_model`, a
+  model string without a `provider:` prefix, where they raised a bare
+  `ValueError`. It is a `ConfigError` with `kind` `unknown_provider`, carries
+  `provider` (`None` when the string named none) and `available`, and is
+  still a `ValueError`, so existing handlers keep working; the messages are
+  unchanged (#491, after the proposal in #505 by mss06s).
+
+### Fixed
+
+- **`SummarizingManager.apply()` calls a synchronous `summarize_fn`.** The
+  synchronous path skipped any `summarize_fn` and wrote the placeholder
+  "Conversation with N messages summarized." as the summary, so a thread
+  compacted through `apply()` with a model-backed summariser kept one line
+  in place of its history. A plain function is now called with the messages
+  to summarise, on `apply()` and on `async_apply()`. An `async def` one
+  cannot be awaited by `apply()`: it still gets the placeholder, and a
+  `LocusWarning` naming `async_apply()` says so once per manager (#583,
+  after the proposal in #597 by aman-code-io).
 
 ## [6.4.0] - 2026-11-23
 
