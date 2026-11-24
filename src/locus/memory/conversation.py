@@ -6,12 +6,23 @@
 
 from __future__ import annotations
 
+import inspect
+import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
+
+from locus.core.warnings import LocusWarning
 
 
 if TYPE_CHECKING:
     from locus.core.messages import Message
+
+
+def _is_async_callable(fn: Any) -> bool:
+    """Whether calling ``fn`` returns a coroutine: an ``async def``, a partial of one, or an object whose ``__call__`` is one."""
+    return inspect.iscoroutinefunction(fn) or inspect.iscoroutinefunction(
+        getattr(fn, "__call__", None)  # noqa: B004
+    )
 
 
 class ConversationManager(ABC):
@@ -224,13 +235,19 @@ class SummarizingManager(ConversationManager):
     When the conversation exceeds a threshold, older messages are
     summarized into a single summary message, preserving recent context.
 
-    This manager requires a summarization function to be provided,
-    which can use an LLM to generate summaries.
+    ``summarize_fn`` writes the summary, typically with a model call. It
+    takes the messages to summarize and returns the summary text. A plain
+    function is called by both :meth:`apply` and :meth:`async_apply`; an
+    ``async def`` function is awaited by :meth:`async_apply` only, since
+    :meth:`apply` is synchronous and cannot await it (it writes a
+    placeholder and warns once). Without a ``summarize_fn`` the summary is
+    a short extract of the last messages before the cut.
 
     Args:
         threshold: Number of messages before summarization kicks in
         keep_recent: Number of recent messages to always preserve
-        summarize_fn: Async function that summarizes a list of messages
+        summarize_fn: Function, sync or async, that takes the list of
+            messages to summarize and returns the summary text
         preserve_system: Whether to preserve the system message
     """
 
@@ -253,13 +270,18 @@ class SummarizingManager(ConversationManager):
         self.summarize_fn = summarize_fn
         self.preserve_system = preserve_system
         self._summary_cache: dict[int, str] = {}
+        self._warned_async_on_sync_path = False
 
     def apply(self, messages: list[Message]) -> list[Message]:
         """
         Apply summarization to messages.
 
-        If total messages exceed threshold, older messages are summarized.
-        Note: If no summarize_fn is provided, falls back to a simple summary.
+        If total messages exceed threshold, older messages are summarized
+        by ``summarize_fn`` when it is a plain function, and by a simple
+        extract when there is none. An ``async def`` ``summarize_fn`` cannot
+        be awaited here: the summary is a placeholder and a
+        :class:`~locus.core.warnings.LocusWarning` says so once per manager;
+        use :meth:`async_apply` for it.
         """
         if not messages:
             return []
@@ -347,10 +369,13 @@ class SummarizingManager(ConversationManager):
 
     def _generate_summary(self, messages: list[Message]) -> str:
         """
-        Generate a summary of messages.
+        Generate a summary of messages on the synchronous path.
 
-        If summarize_fn is provided, it's used. Otherwise, a simple
-        extractive summary is generated.
+        A plain ``summarize_fn`` is called with ``messages`` and its return
+        is the summary. An async one cannot be awaited here, so the summary
+        is a placeholder and a warning names :meth:`async_apply` (once per
+        manager). With no ``summarize_fn``, a simple extractive summary is
+        generated. The result is cached per message list.
         """
         # Create cache key from message contents
         cache_key = hash(
@@ -361,9 +386,7 @@ class SummarizingManager(ConversationManager):
             return self._summary_cache[cache_key]
 
         if self.summarize_fn is not None:
-            # If async function provided, we can't call it synchronously
-            # This is a limitation - for async summarization, use async API
-            summary = f"Conversation with {len(messages)} messages summarized."
+            summary = self._summarize_sync(messages)
         else:
             # Simple extractive summary
             summary_parts = []
@@ -378,12 +401,36 @@ class SummarizingManager(ConversationManager):
         self._summary_cache[cache_key] = summary
         return summary
 
+    def _summarize_sync(self, messages: list[Message]) -> str:
+        """Call a plain ``summarize_fn``; an async one gets the placeholder and a warning."""
+        fn = self.summarize_fn
+        if not _is_async_callable(fn):
+            result = fn(messages)  # type: ignore[misc]
+            if not inspect.isawaitable(result):
+                return str(result)
+            # A plain callable that handed back a coroutine (a lambda around
+            # an async function): nothing here can await it.
+            close = getattr(result, "close", None)
+            if close is not None:
+                close()
+        if not self._warned_async_on_sync_path:
+            self._warned_async_on_sync_path = True
+            warnings.warn(
+                "SummarizingManager.apply() is synchronous and cannot await an async "
+                "summarize_fn, so the summary is a placeholder. Use async_apply() "
+                "with an `async def` summarize_fn, or pass a plain function.",
+                LocusWarning,
+                stacklevel=4,
+            )
+        return f"Conversation with {len(messages)} messages summarized."
+
     async def async_apply(self, messages: list[Message]) -> list[Message]:
         """
         Async apply with LLM summarization support.
 
-        If summarize_fn is an async function, it will be properly awaited.
-        Falls back to synchronous _generate_summary() otherwise.
+        An ``async def`` ``summarize_fn`` is awaited. A plain function is
+        called through the same path :meth:`apply` uses, and with none the
+        simple extract is generated.
         """
         if not messages:
             return []
@@ -411,7 +458,6 @@ class SummarizingManager(ConversationManager):
         recent = non_system_messages[-self.keep_recent :]
 
         # Use async summarize_fn if available
-        import asyncio
 
         from locus.observability.emit import (  # noqa: PLC0415
             EV_MEMORY_COMPACTOR_COMPLETED,
@@ -430,7 +476,7 @@ class SummarizingManager(ConversationManager):
         _started = _time.perf_counter()
 
         try:
-            if self.summarize_fn is not None and asyncio.iscoroutinefunction(self.summarize_fn):
+            if self.summarize_fn is not None and _is_async_callable(self.summarize_fn):
                 summary_text = await self.summarize_fn(to_summarize)
             else:
                 summary_text = self._generate_summary(to_summarize)

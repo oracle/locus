@@ -11,10 +11,10 @@ keyword. A constant has a site when its name or its value shows up in
 either set, so ``emit(EV_X, ...)`` and ``emit("x.y", ...)`` both count while
 a mention in a docstring or comment does not.
 
-``NO_SITE_YET`` mirrors the "Declared but not emitted" list in
-``docs/concepts/sse-events.md``. Give one of those constants an emit site
-and this test tells you to take it off the list; add a new constant without
-a site and it tells you to add one.
+``NO_SITE_YET`` mirrors the "Declared but not emitted" section in
+``docs/concepts/sse-events.md`` and is empty today. Add a constant without
+an emit site and this test tells you to give it one or to list it here and
+on that page; give a listed constant a site and it tells you to take it off.
 """
 
 from __future__ import annotations
@@ -28,15 +28,7 @@ emit_module = importlib.import_module("locus.observability.emit")
 EMIT_FILE = Path(emit_module.__file__).resolve()
 PACKAGE_ROOT = EMIT_FILE.parents[1]
 
-NO_SITE_YET = frozenset(
-    {
-        "EV_A2A_TASK_PROCESSING",
-        "EV_GRAPH_NODE_ROUTED",
-        "EV_RAG_EMBEDDING_GENERATED",
-        "EV_RAG_STORE_SEARCH",
-        "EV_RAG_STORE_UPSERT",
-    }
-)
+NO_SITE_YET: frozenset[str] = frozenset()
 
 
 def declared_constants() -> dict[str, str]:

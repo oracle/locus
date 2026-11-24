@@ -19,6 +19,8 @@
         VectorStoreError              vector_store_error
       ValidationError                 validation_error
       ConfigError                     config_error
+        UnknownProviderError          unknown_provider  (also a ValueError; raised by
+                                      get_model and get_checkpointer)
       GSARValidationError             gsar_validation_error  (raised only when
                                       GSARConfig.fail_on_low_score is set)
       ApprovalPendingError            approval_pending  (raised by Agent.resume(...,
@@ -29,7 +31,7 @@
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 948 662" role="img" aria-labelledby="title desc">
   <title id="title">The Locus error hierarchy</title>
-  <desc id="desc">LocusError, kind locus_error, is the root of the hierarchy in locus.core.errors, so catching it catches every class shown here. Its direct subclasses are ToolError, ModelError, CheckpointError, RAGError, ValidationError, ConfigError, GSARValidationError and ApprovalPendingError. ToolError, kind tool_error, has ToolNotFoundError (tool_not_found), ToolValidationError (tool_validation) and ToolExecutionError (tool_execution). ModelError, kind model_error, has ModelAuthError (model_auth), ModelThrottledError (model_throttled) and ModelResponseError (model_response). CheckpointError, kind checkpoint_error, has CheckpointNotFoundError (checkpoint_not_found) and CheckpointSerializationError (checkpoint_serialization). RAGError, kind rag_error, has EmbeddingError (embedding_error) and VectorStoreError (vector_store_error). ValidationError (validation_error), ConfigError (config_error), GSARValidationError (gsar_validation_error) and ApprovalPendingError (approval_pending) have no subclasses. Catching a class also catches all of its subclasses.</desc>
+  <desc id="desc">LocusError, kind locus_error, is the root of the hierarchy in locus.core.errors, so catching it catches every class shown here. Its direct subclasses are ToolError, ModelError, CheckpointError, RAGError, ValidationError, ConfigError, GSARValidationError and ApprovalPendingError. ToolError, kind tool_error, has ToolNotFoundError (tool_not_found), ToolValidationError (tool_validation) and ToolExecutionError (tool_execution). ModelError, kind model_error, has ModelAuthError (model_auth), ModelThrottledError (model_throttled) and ModelResponseError (model_response). CheckpointError, kind checkpoint_error, has CheckpointNotFoundError (checkpoint_not_found) and CheckpointSerializationError (checkpoint_serialization). RAGError, kind rag_error, has EmbeddingError (embedding_error) and VectorStoreError (vector_store_error). ConfigError, kind config_error, has UnknownProviderError (unknown_provider). ValidationError (validation_error), GSARValidationError (gsar_validation_error) and ApprovalPendingError (approval_pending) have no subclasses. Catching a class also catches all of its subclasses.</desc>
   <defs>
     <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
@@ -59,6 +61,7 @@
   <path class="edge" d="M634,311 H648"/>
   <path class="edge" marker-end="url(#ah)" d="M648,311 V285 Q648,279 654,279 H666"/>
   <path class="edge" marker-end="url(#ah)" d="M648,311 V337 Q648,343 654,343 H666"/>
+  <path class="edge" marker-end="url(#ah)" d="M634,483 H666"/>
 
   <g class="node primary">
     <rect x="353" y="20" width="150" height="54" rx="12"/>
@@ -145,6 +148,11 @@
     <rect x="454" y="456" width="180" height="54" rx="12"/>
     <text x="544" y="473">ConfigError</text>
     <text class="sub" x="544" y="494">config_error</text>
+  </g>
+  <g class="node">
+    <rect x="668" y="456" width="260" height="54" rx="12"/>
+    <text x="798" y="473">UnknownProviderError</text>
+    <text class="sub" x="798" y="494">unknown_provider</text>
   </g>
   <g class="node">
     <rect x="454" y="520" width="180" height="54" rx="12"/>
