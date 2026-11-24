@@ -67,7 +67,7 @@ for every iteration of the inner loop.
 | `agent.grounding` | `score`, `claims_evaluated`, `ungrounded_count`, `requires_replan` | Grounding enabled |
 | `agent.model.chunk` | `content_preview`, `done`, `has_tool_calls` | Only with `stream_tokens=True` |
 | `agent.model.completed` | `content_preview`, `tool_call_count`, `stop_reason` | Not emitted by the `Agent.run` bridge (the loop never yields `ModelCompleteEvent`); `EventBusHook` publishes its own `agent.model.completed` with `stop_reason`, `content_length` |
-| `agent.tokens.used` | `prompt_tokens`, `completion_tokens`, `total_tokens` | Not currently emitted: bridged only from `ModelCompleteEvent`, which the loop never yields |
+| `agent.tokens.used` | `prompt_tokens`, `completion_tokens`, `total_tokens`, `scope` (`"run"` \| `"call"`) | Once per run with the cumulative counts (`scope="run"`), bridged from the terminate event, when the provider metered the run; an unmetered run publishes none. `scope="call"` is the per-call shape bridged from `ModelCompleteEvent`, which the loop never yields |
 | `agent.interrupt` | `interrupt_id`, `question_preview`, `options` | Human-in-the-loop (HITL) pause |
 | `agent.context.compacted` | `iteration`, `stage` (`"prune"` \| `"summarize"` \| `"truncate"` \| `"native"` \| `"window"` \| `"relevance"`), `tokens_before`, `tokens_after`, `threshold`, `exhausted`, `tier` (tiered compaction only) | Context compaction; `exhausted` means the run ends with `context_exhausted`. A `TieredCompaction` publishes one event per tier that ran, in order, `tier` naming it (`clear_tool_results`, `sliding_window`, `native`, `summarize`, `relevance`) and each `tokens_before` continuing the previous `tokens_after`; the plain `ContextCompactor` sends no `tier` |
 | `agent.terminate` | `reason`, `iterations_used`, `final_confidence`, `total_tool_calls`, `final_message_preview` | One per dispatch |
@@ -329,7 +329,8 @@ and the span boundary come from the same moment of the loop.
 | `agent.tool.started` / `agent.tool.completed` (both shapes) | start / end of `execute_tool`; the `EventBusHook` shape's `tool_call_id` is the span's `gen_ai.tool.call.id`. A call a hook cancels still has its span — the after-tool hooks run with the cancellation message as the result — and the span ends without `error.type`; the event's payload is what says it was cancelled |
 | `agent.think` | inside `locus.iteration`, after that iteration's `chat` span ended |
 | `agent.model.chunk` | inside `chat` (streaming) |
-| `agent.model.completed`, `agent.tokens.used` (bridge) | not emitted (see above); the token counts are on the `chat` span's `gen_ai.usage.*` attributes and the run totals on `invoke_agent` |
+| `agent.model.completed` (bridge) | not emitted (see above); the per-call token counts are on the `chat` span's `gen_ai.usage.*` attributes |
+| `agent.tokens.used` | end of `invoke_agent`, next to `agent.terminate`; the same totals are the `invoke_agent` span's `gen_ai.usage.*` attributes |
 | `agent.reflect`, `agent.grounding` | inside `locus.iteration`; the reflection and grounding model calls go through the model directly, not the hooked loop, so they have no `chat` span of their own |
 | `agent.context.compacted` | inside `locus.iteration`, before the `chat` span (the summarising call of a `summarize` stage has no `chat` span of its own) |
 | `agent.interrupt` | inside `invoke_agent`; the run returns paused, so the span ends, and the resumed run is a new `invoke_agent` span with the same `gen_ai.conversation.id` |

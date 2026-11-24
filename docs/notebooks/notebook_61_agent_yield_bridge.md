@@ -25,10 +25,10 @@ stream-only classes in the drawing below (`ToolProgressEvent`,
 | `ReflectEvent` | `agent.reflect` | |
 | `GroundingEvent` | `agent.grounding` | |
 | `ModelChunkEvent` | `agent.model.chunk` | only with `run(..., stream_tokens=True)` |
-| `ModelCompleteEvent` | `agent.model.completed` | plus `agent.tokens.used` when `usage` is set; never yielded by `Agent.run` |
+| `ModelCompleteEvent` | `agent.model.completed` | plus `agent.tokens.used` (`scope="call"`) when `usage` is set; never yielded by `Agent.run` |
 | `InterruptEvent` | `agent.interrupt` | |
 | `CompactionEvent` | `agent.context.compacted` | only when a `ContextCompactor` compacts the history; stage, tokens before and after |
-| `TerminateEvent` | `agent.terminate` | |
+| `TerminateEvent` | `agent.terminate` | plus `agent.tokens.used` (`scope="run"`) with the run's cumulative usage when the provider metered it |
 
 What this notebook covers:
 
@@ -40,9 +40,10 @@ What this notebook covers:
   identifiable information (PII).
 - Token usage from `result.metrics`, which cost meters and budget
   enforcers on always-on privacy-review automation read after each run.
-  The bus carries no token counts in this run: `agent.tokens.used` is
-  bridged only from `ModelCompleteEvent`, which `Agent.run` does not
-  yield, and the `agent.terminate` payload omits usage.
+  The bus carries the same totals once per run as `agent.tokens.used`
+  (`scope="run"`), bridged from the terminate event; there are no
+  per-call deltas, because `Agent.run` does not yield
+  `ModelCompleteEvent`.
 
 The drawing below places this notebook's run in the wider event model: on
 the left, the typed event classes, split into the ten the bridge

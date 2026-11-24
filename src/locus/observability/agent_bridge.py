@@ -80,12 +80,16 @@ async def bridge_locus_event(event: LocusEvent) -> None:
     * ``ModelChunkEvent`` → ``agent.model.chunk`` (streaming tokens;
       caller is responsible for any throttling).
     * ``ModelCompleteEvent`` → ``agent.model.completed`` AND a
-      separate ``agent.tokens.used`` event so token-cost dashboards
-      can subscribe without parsing model-completion payloads.
+      separate ``agent.tokens.used`` (``scope="call"``) so token-cost
+      dashboards can subscribe without parsing model-completion
+      payloads.
     * ``InterruptEvent`` → ``agent.interrupt`` so HITL UIs can pop
       modals on the bus.
     * ``TerminateEvent`` → ``agent.terminate`` with the canonical
-      stop reason + iteration count.
+      stop reason + iteration count, AND ``agent.tokens.used``
+      (``scope="run"``) with the run's cumulative usage when the
+      provider metered it: the loop yields no ``ModelCompleteEvent``,
+      so this is where a run's token counts reach the bus.
     * ``CompactionEvent`` → ``agent.context.compacted`` with the stage
       and the token counts before and after.
 
@@ -156,6 +160,7 @@ async def bridge_locus_event(event: LocusEvent) -> None:
                 prompt_tokens=event.usage.get("prompt_tokens", 0),
                 completion_tokens=event.usage.get("completion_tokens", 0),
                 total_tokens=event.usage.get("total_tokens", 0),
+                scope="call",
             )
     elif isinstance(event, InterruptEvent):
         await emit(
@@ -187,3 +192,14 @@ async def bridge_locus_event(event: LocusEvent) -> None:
             total_tool_calls=event.total_tool_calls,
             final_message_preview=_preview(event.final_message),
         )
+        # The run's cumulative usage, once, when the provider metered it.
+        # ``None`` means unmetered (a stub, or a provider that reports
+        # nothing), and an unmetered run publishes no counts at all.
+        if event.usage:
+            await emit(
+                EV_AGENT_TOKENS_USED,
+                prompt_tokens=event.usage.get("prompt_tokens", 0),
+                completion_tokens=event.usage.get("completion_tokens", 0),
+                total_tokens=event.usage.get("total_tokens", 0),
+                scope="run",
+            )
