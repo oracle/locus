@@ -1395,12 +1395,14 @@ class StateGraph(BaseModel):
                     {"source": "step", "step": iterations},
                 )
 
-            # Check if we've reached END
-            if END in current_nodes or END in next_nodes:
+            # END is a sink, not a stop signal: a branch that routes to it
+            # is finished, and the run goes on while any other branch still
+            # has a node to execute. The run ends when nothing is pending.
+            pending_nodes = [n for n in dict.fromkeys(next_nodes) if n != END]
+            if not pending_nodes:
                 break
 
-            # Move to next nodes (deduplicate)
-            current_nodes = list(dict.fromkeys(next_nodes))
+            current_nodes = pending_nodes
 
         # Calculate duration
         end_time = datetime.now(UTC)
