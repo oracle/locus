@@ -45,6 +45,13 @@ policy.
   request and reports what its tool returned. Each shape makes one more
   model call (#634).
 
+- **An empty synthesis is a failed dispatch.** `SynthesizedPipelineRunnable`
+  returned a `RunnableResult` with empty `text` when the synthesis agent
+  replied with nothing, so `Router.dispatch` reported a successful run with
+  nothing to show while the findings sat on `raw.outputs`. It now raises
+  `ProtocolExecutionError`, as a pipeline that produced no finding already
+  did, and the dispatcher publishes it as `router.runnable.failed`.
+
 ### Documentation
 
 - The observability page's paragraph on `cost_usd` said an OCI id had no
