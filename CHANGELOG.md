@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.5.2] - 2026-11-24
+
 ### Fixed
 
 - **A branch that reaches `END` no longer ends the whole graph.** `StateGraph`
