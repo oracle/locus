@@ -316,3 +316,40 @@ async def test_a_request_the_gate_holds_is_answered_as_not_executed() -> None:
     assert result.protocol_id == "approval_gated_execution"
     assert result.message.startswith("Not executed: the request was held by policy")
     assert "Restarted" not in result.message
+
+
+class _FlakyTier(_Tier):
+    """A tier whose model raises on the first reading of a case and answers after."""
+
+    def __init__(self, can_do: set[str], *, flaky: set[str]) -> None:
+        super().__init__(can_do)
+        self.flaky = flaky
+        self.seen: set[str] = set()
+
+    async def arun(self, prompt: str) -> Any:
+        name = prompt.removeprefix("prompt of ")
+        if name in self.flaky and name not in self.seen:
+            self.seen.add(name)
+            raise RuntimeError("provider down, once")
+        return await super().arun(prompt)
+
+
+async def test_one_errored_reading_makes_the_tier_decide_nothing() -> None:
+    """With repeats, an errored reading is kept as a failed one and shown as the
+    most pessimistic reading, and a shown error decides nothing for the tier:
+    the case is not measured, however the other readings went."""
+    cases = answer_cases([_case("a", "low"), _case("b", "low")])
+    small = await EvalRunner(_FlakyTier({"a", "b"}, flaky={"a"}), judge=_Judge(), repeats=2).arun(
+        cases
+    )
+    large = await EvalRunner(_Tier({"a", "b"}), judge=_Judge(), repeats=2).arun(cases)
+    measured = {m.case: m for m in measure_difficulty(cases, {"small": small, "large": large})}
+
+    assert measured["a"].measured == NOT_MEASURED
+    assert measured["a"].passed == {"small": None, "large": True}
+    # The reading that answered is on the record, so a rerun is the remedy.
+    small_a = next(r for r in small.results if r.case_name == "a")
+    assert small_a.error is not None
+    assert [s.passed for s in small_a.samples].count(True) == 1
+    # The case the tier answered on both readings is measured as usual.
+    assert measured["b"].measured == "low"

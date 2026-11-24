@@ -212,7 +212,10 @@ python scripts/router_difficulty.py \
 
 The tiers are given cheapest first, two or more. The judge should be none
 of them: a model grading its own answer measures self-consistency. With
-three readings a tier passes a case only when every reading passed. The
+three readings a tier passes a case only when every reading passed, and a
+tier whose model raised on any reading of a case decides nothing for it,
+whatever its other readings said: the case is `not_measured` unless a
+graded tier settled it, and the operator reruns. The
 script stores one report per tier (`router-difficulty-<tier>` suites in the
 report store), prints the intended level against the measured one with the
 traps on a row of their own, lists the cases where the two differ, and
