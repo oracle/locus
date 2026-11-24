@@ -24,6 +24,13 @@ Only deterministic, offline notebooks belong here. Every entry in
 :data:`PAGES` was verified to produce byte-identical output across runs before
 being added; one that starts varying will fail ``--check`` loudly rather than
 drifting quietly, which is the intended outcome.
+
+Pages outside :data:`PAGES` may still carry an ``## Output`` section: a
+capture of a live-model run, trimmed by hand, for notebooks whose offline run
+shows nothing (the mock model gives every turn the same reply) or prints
+wall-clock timings. Those sections end with the same marker and say in their
+first sentence that the run was live; this script neither rewrites nor checks
+them, and ``tests/docs/test_notebook_pages.py`` holds them to the page shape.
 """
 
 from __future__ import annotations

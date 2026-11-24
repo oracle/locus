@@ -110,10 +110,10 @@ def example_sdk_transport() -> None:
     from locus.agent import Agent
     from locus.models.providers.oci import OCIModel
 
-    print("=== OCIModel (OCI SDK, Cohere R-series) ===\n")
+    print("=== OCIModel (OCI SDK, Cohere) ===\n")
 
     model = OCIModel(
-        model_id="cohere.command-r-plus-08-2024",
+        model_id="cohere.command-a-03-2025",
         profile_name=_env("OCI_PROFILE"),
         # api_key, security_token, instance_principal, resource_principal all supported
         auth_type="api_key",
@@ -169,7 +169,7 @@ def print_comparison() -> None:
     # Rows describe each class called on its own. Through Agent, the
     # server-stateful Responses path answers via complete() rather than a
     # token stream, and only OCIChatCompletionsModel receives a native
-    # response_format. OCIModel also serves cohere.command-a*.
+    # response_format.
     print("=== Decision table ===\n")
     rows: list[tuple[str, str, str, str]] = [
         (
@@ -183,7 +183,7 @@ def print_comparison() -> None:
         (
             "Model families",
             "openai, xai, gemini (Responses-only)",
-            "cohere.command-r*",
+            "cohere.command-r*, command-a*",
             "all (default)",
         ),
         ("Project OCID", "optional", "no", "no"),
@@ -192,18 +192,18 @@ def print_comparison() -> None:
         ("Streaming", "yes (SSE)", "yes", "yes (SSE)"),
         ("Structured output", "yes", "limited", "yes"),
     ]
-    width = max(len(r[0]) for r in rows) + 2
-    cols = [width, 26, 24, 30]
     header = (
         "Field",
         "Responses (server-stateful)",
         "OCIModel (SDK)",
         "OCIChatCompletionsModel (default)",
     )
-    print(" ".join(f"{c:<{w}}" for c, w in zip(header, cols, strict=False)))
-    print(" ".join("-" * w for w in cols))
+    # Each column is as wide as its longest cell, header included.
+    cols = [max(len(r[i]) for r in [header, *rows]) for i in range(len(header))]
+    print("  ".join(f"{c:<{w}}" for c, w in zip(header, cols, strict=True)).rstrip())
+    print("  ".join("-" * w for w in cols))
     for r in rows:
-        print(" ".join(f"{c:<{w}}" for c, w in zip(r, cols, strict=False)))
+        print("  ".join(f"{c:<{w}}" for c, w in zip(r, cols, strict=True)).rstrip())
     print()
 
 

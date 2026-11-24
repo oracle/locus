@@ -271,8 +271,9 @@ async def main() -> None:
     # =========================================================================
     print("\n=== Part 5: Complex Nested Structures ===\n")
     nested = await _llm_call(
-        "Output a JSON for a customer Acme Co, lifetime_value 4800, tier "
-        "(plan 'enterprise', region 'us-east', standing 'good'), "
+        "Output one flat JSON object for a customer, with exactly these top-level "
+        "keys: name 'Acme Co', lifetime_value 4800, tier (an object with plan "
+        "'enterprise', region 'us-east', standing 'good'), "
         "products [seats, analytics]. Inside ```json.",
         system="Output only the fenced JSON block.",
         max_tokens=240,

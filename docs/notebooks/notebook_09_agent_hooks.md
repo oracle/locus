@@ -72,6 +72,69 @@ Model choice comes from `examples/config.py`: OCI Generative AI when
 example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
 (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the audit hook's trail around one tool call, the timing report, the validation hook clamping `base` and `delta` to 100 before the tool runs (so the tool returns 200), and the guardrail hook flagging `password` in a tool argument; the timestamped audit log of Part 4 is elided (`...`); the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Understanding Hooks ===
+
+Running agent with audit-trail hook:
+
+  [AUDIT] Run started: 'Scale the service: base 5, delta 3...'
+  [AUDIT] Tool call: adjust_capacity({'base': 5, 'delta': 3})
+  [AUDIT] Tool done: adjust_capacity -> 8
+  [AUDIT] Run finished: success=True
+
+Result: The service has been scaled. The new instance count is 8 (base 5 + delta 3). If you need further adjustments or details, let me know!
+
+=== Part 2: Timing Hook ===
+
+
+  Timing Report:
+    Total: 2581.6ms
+    adjust_capacity: 0.4ms
+Result: The service has been scaled from a base of 10 instances by a delta of 20, resulting in a new total of 30 instances.
+
+=== Part 3: Validation Hook ===
+
+  [VALIDATION] Clamping base=5000 to 100
+  [VALIDATION] Clamping delta=3000 to 100
+Result: The adjusted capacity value returned is 200.
+
+If you need a different calculation (such as with your requested base 5000 and delta 3000), please clarify. Otherwise, this is the value based on the last operation.
+
+=== Part 4: Multiple Hooks ===
+
+
+  Timing Report:
+    Total: 2477.9ms
+    adjust_capacity: 0.5ms
+Result: The service has been scaled from a base of 7 by a delta of 8, resulting in a new total of 15 instances.
+
+...
+
+=== Part 5: Guardrails Hook ===
+
+  [GUARDRAIL] Blocked pattern detected: 'password'
+  [GUARDRAIL] Warning: 'password' in analyze_manifest args
+Result: Here is the analysis of your manifest:
+
+- Character count: 24
+- Word count: 3
+- Unique words: 3
+- SHA-256 digest: 13ca8e50e366
+
+Let me know if you need a deeper analysis or further breakdown of this manifest.
+
+Blocked calls detected: 1
+
+============================================================
+Next: Notebook 10 — RELEASE GUARD: guardrails around a deploy-ops agent
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_09_agent_hooks.py`"

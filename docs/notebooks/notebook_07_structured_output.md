@@ -102,6 +102,81 @@ python examples/notebook_07_structured_output.py
   [GSAR concept page](../concepts/gsar.md) defines the grounding score
   and the proceed, regenerate or replan decision.
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints each model call's duration and token counts, the JSON extracted and parsed into Pydantic models, the two failures non-strict parsing reports (invalid JSON, a missing field) and the `StructuredOutputError` strict mode raises, then nested, verdict and tool-selection schemas and the `IssueList` an agent fills through `output_schema`; the model's wording and the timings differ from run to run:
+
+````text
+=== Part 1: Basic JSON Extraction ===
+
+  [model call: 2.60s · 49→24 tokens]
+  extract_json -> {
+  "value": "order-100847",
+  "type": "order_id"
+}
+  type 'order_id' is a recognized ChannelType
+
+=== Part 2: Parsing into Pydantic Models ===
+
+  [model call: 1.38s · 49→23 tokens]
+  Success: True  Parsed: value='jane@example.com' type=<ChannelType.email: 'email'>
+
+=== Part 3: Error Handling ===
+
+  [model call: 0.86s · 29→5 tokens]
+  Invalid JSON - Success: False  Error: JSON parse error: Expecting value: line 1 column 1 (char 0)
+  [model call: 0.99s · 43→18 tokens]
+  Missing-field - Success: False  Error: Validation error: 1 validation error for ContactPoint
+type
+  Field required [type=missing, input_value={'value': '+1-555-0142'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.14/v/missing
+  Strict mode raised StructuredOutputError
+
+=== Part 4: Creating Schema Prompts ===
+
+  schema_prompt (head): Respond with a JSON object matching this schema:
+
+```json
+{
+  "properties": {
+    "resolved": {
+      "description": "Whether the ticket was resolved",
+      "t...
+  [model call: 1.13s · 145→57 tokens]
+  Parsed: resolved=True action='Issued a refund for the damaged wireless-headset order.' tags=['wireless-headset', 'refund', 'damaged-item', 'customer-service']
+
+=== Part 5: Complex Nested Structures ===
+
+  [model call: 1.28s · 75→65 tokens]
+  Customer: Acme Co (LTV 4800, enterprise)
+  Products: seats, analytics
+
+=== Part 6: ConversationVerdict ===
+
+  [model call: 4.19s · 170→42 tokens]
+  ConversationVerdict: intent=request refund or price adjustment / sentiment=negative
+  Classifier confidence: 95%
+  Evidence coverage: 83%
+
+=== Part 7: Agent ToolSelection prompt ===
+
+  [model call: 1.44s · 127→66 tokens]
+  tool=order_tracking  args={'order_id': '100847'}
+  reasoning=The user wants to check the shipping status of a specific order. The 'order_tracking' tool is appropriate for retrieving the current shipping status of order 100847.
+
+=== Part 8: Agent(output_schema=IssueList) ===
+
+  [model call output_schema: 1.22s · 523→65 tokens]
+  Mobile app crashes during checkout        confidence=0.99  priority=urgent
+  Customer was double-charged for a single  confidence=0.98  priority=high
+  Help center login link is broken          confidence=0.95  priority=normal
+
+============================================================
+Done. Next: notebook 54 — reasoning patterns.
+============================================================
+````
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_07_structured_output.py`"

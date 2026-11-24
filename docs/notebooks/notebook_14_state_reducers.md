@@ -75,6 +75,67 @@ graph code, so the offline variant shows every merge:
 LOCUS_MODEL_PROVIDER=mock python examples/notebook_14_state_reducers.py
 ```
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the two signals a plain state key loses and `append_list` keeps, each built-in reducer's merged value, two custom reducers, `last_value` next to an accumulated timeline, a schema mixing reducers, and two model-producing nodes appending to one `add_messages` list; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Why reducers exist ===
+
+Without reducers: signals = ['3-D Secure authentication failed']
+  (Only the 3-D Secure signal - we lost the fraud and AVS signals!)
+
+=== Part 1b: Same graph, with append_list ===
+
+With append_list reducer: signals = ['Velocity: 8 charges in 2 minutes', 'AVS mismatch: billing ZIP does not match', '3-D Secure authentication failed']
+  (All three checks' signals preserved!)
+
+=== Part 2: Built-in reducers ===
+
+add_messages reducer:
+  [user] New chargeback on account A-204 — anything related?
+  [assistant] Correlated: same card BIN as case 1042.
+
+add_numbers reducer:
+  flagged_txn_count = 5
+
+=== Part 2b: merge_dict ===
+
+Final gateway config: {'step_up_3ds': True, 'timeout': 60, 'retries': 3}
+  (All settings merged together)
+
+=== Part 3: Custom reducers ===
+
+Peak fraud score (max): 90
+Flagged cards (unique): ['411111******1111', '511111******2222', '601111******3333']
+
+=== Part 4: last_value ===
+
+Status (last value): declined
+Timeline (accumulated): ['Risk screening complete', 'Manual review complete', 'Decline decision logged']
+
+=== Part 5: Mixing reducers on one schema ===
+
+Final Authorization State:
+  Signals: 2 signals
+  Risk score: 58.50
+  Adjustments: {'allowlist_review': 6.5}
+  Status: finalized
+  Messages: 4 audit entries
+
+=== Part 6: add_messages with two LLM-producing nodes ===
+
+  [model call (summary): 1.90s · 41→32 tokens]
+  [model call (recommendation): 0.99s · 31→8 tokens]
+  [summary] Fraudsters used stolen cards for rapid-fire purchases, but mismatched AVS data and failed 3-D Secure authentication flagged the scam before any goods shipped.
+  [recommendation] Flag transaction; escalate for immediate investigation.
+
+============================================================
+Next: Notebook 15 — Human approval gates for production changes
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_14_state_reducers.py`"

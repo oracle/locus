@@ -91,6 +91,40 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_18_functional_api.py
 - [Notebook 20 — Scatter-gather with Send](notebook_20_map_reduce_support_triage.md)
   — the fan-out shape of the diagram written as a graph.
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints a two-task pipeline with per-task timings, a task that succeeds on its third attempt, a cached task called twice for three lookups, and a task wrapping a model call; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: A two-task pipeline ===
+
+Result: dispute assessed: transaction record for TXN-2024-99999
+Tasks executed: 2
+  fetch_transaction: 0.0ms
+  assess: 0.0ms
+Total: 0.0ms
+
+=== Part 2: @task(retry_attempts=3) ===
+
+Result: processor entry for: TXN-2024-99999
+Attempts needed: 3
+
+=== Part 3: @task(cache=True) ===
+
+r1=score_lookup_1, r2=score_lookup_1, r3=score_lookup_2
+Actual calls: 2
+
+=== Part 4: @task wrapping an LLM call ===
+
+  [model call: 2.58s · 44→47 tokens]
+Assessment: The likely fraud risk of TXN-2024-99999 for a typical card-not-present charge is elevated due to the higher susceptibility of such transactions to unauthorized use, as the physical card is not verified at the point of sale.
+
+============================================================
+Next: Notebook 19 — Composing data-privacy agents into pipelines
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_18_functional_api.py`"

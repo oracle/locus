@@ -103,6 +103,66 @@ LOCUS_MODEL_PROVIDER=mock python examples/notebook_16_advanced_patterns.py
   `Send` fan-out to analyst agents and a reducer that reads their results
   back from state (notebook 20).
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the branch and owner each `Command` selects, `goto()` and `end()` on a support-hours token, `scatter()` over three tickets, the confidence-gated triage after `broadcast()`, a subgraph accepting and rejecting tickets, a `Store` that remembers the previous outcome, and a model choosing the `Command` target; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Command — state and routing in one return ===
+
+billing: branch=billing_resolution, owner=billing team
+technical: branch=technical_support, owner=engineering support
+unknown: branch=general_triage, owner=front-line agent
+
+=== Part 1b: goto() and end() ===
+
+Hours token 'hours-open': Live agent picked up the ticket
+Hours token 'hours-closed': Outside support hours — queued for the morning
+
+=== Part 2: scatter() ===
+
+Acknowledged 3 tickets
+Results: ['auto-reply sent for password reset', 'auto-reply sent for refund request', 'auto-reply sent for shipping delay']
+
+=== Part 2b: broadcast() + confidence-gated triage ===
+
+confident: AUTO_RESOLVE (confidence=high, reasons=['intent matched a known self-service issue', 'ticket carries a vetted knowledge-base tag'])
+suspected: ESCALATE (confidence=low, reasons=['ticket length exceeded the heuristic threshold'])
+
+=== Part 3: Subgraph as a node ===
+
+Well-formed ticket: state = accepted
+Missing customer field: state = rejected
+
+=== Part 4: Store — memory that outlives one graph run ===
+
+Ticket 1:
+  New issue for this team — handle with care
+
+Ticket 2:
+  Seen before — last outcome: resolved in 40s
+
+=== Part 5: Command + scatter + Store together ===
+
+Standard customer, urgency 20: standard handling
+Standard customer, urgency 95: priority handling
+VIP customer, urgency 10: priority handling
+
+=== Part 6: LLM-decided Command target ===
+
+  [model call: 1.60s · 47→1 tokens]
+  'The customer confirmed the password rese…' → closed as resolved
+  [model call: 1.57s · 48→1 tokens]
+  'Sent the customer troubleshooting steps …' → awaiting customer reply — kept open
+  [model call: 0.99s · 49→3 tokens]
+  'Customer is furious about a double charg…' → escalated to a senior agent
+
+============================================================
+Next: Notebook 17 — Resilient cloud-provisioning workflows
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_16_advanced_patterns.py`"

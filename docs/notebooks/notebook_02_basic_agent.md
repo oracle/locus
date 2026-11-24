@@ -52,6 +52,62 @@ Model choice comes from `examples/config.py`: OCI Generative AI when
 example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
 (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
+## Output
+
+Running it against a live model — OCI Generative AI, `openai.gpt-4.1` — prints the provider round trip behind a one-word smoke reply, LEDGER's triage of a card-testing pattern from `run_sync`, the `think` and `terminate` events the streaming form yields, the fields and metrics on `AgentResult`, and one triage per transaction in the queue; the model's wording and the timings differ from run to run:
+
+```text
+=== Part 1: Creating an Agent ===
+
+Agent created with model: OCIChatCompletionsModel
+System prompt: You are LEDGER, a tier-1 transaction triage agent for a paym...
+  [provider call: 2.68s · 95→1 tokens]
+  Smoke reply: ready
+
+=== Part 2: Blocking Execution (run_sync) ===
+
+Transaction: txn_8841 (Northwind Coffee, $1.00)
+LEDGER: This pattern is consistent with possible card testing: many small transactions from the same BIN across multiple merchants in a short period. A human should review for fraud and consider blocking further authorizations from this BIN or velocity controls.
+Success: True
+Stop reason: complete
+
+=== Part 3: Streaming Execution (run) ===
+
+Transaction: txn_8843 (Harbourline Outfitters, $289.40 chargeback)
+Events:
+  think: This pattern is consistent with possible friendly fraud or a cardholde
+  terminate: This pattern is consistent with possible friendly fraud or a cardholde
+
+=== Part 4: Understanding Results ===
+
+AgentResult fields:
+  .message     = This pattern is consistent with a recurring subscription or membership payment that has proceeded without dispute for 9 months. No action needed unless the cardholder raises an issue; continue to monitor for any changes in pattern or new disputes.
+  .success     = True
+  .stop_reason = complete
+  .confidence  = 0.0
+
+Metrics:
+  .metrics.iterations  = 1
+  .metrics.tool_calls  = 0
+  .metrics.duration_ms = 1968
+
+=== Part 5: A Triage Queue ===
+
+▸ txn_8841 — card testing
+  This pattern is consistent with possible card testing activity: many small-amount authorizations from the same BIN across multiple merchants in a short time frame. A human should review the transaction for fraud risk, consider blocking the BIN temporarily, and investigate related activity.
+
+▸ txn_8842 — recurring subscription
+  This pattern is consistent with a recurring subscription payment that has been stable and undisputed. No action needed unless the cardholder reports an issue.
+
+▸ txn_8843 — chargeback
+  This pattern is consistent with a possible friendly fraud or a dispute by an authorized user, given the delivery was signed for at the billing address and prior undisputed orders exist. A human should review the delivery proof and account history, and consider submitting evidence of delivery and account usage to contest the chargeback.
+
+============================================================
+Next: Notebook 03 — Giving an Agent Tools
+============================================================
+```
+<!-- notebook-output:end -->
+
 ## Source
 
 ??? note "Full source — `examples/notebook_02_basic_agent.py`"

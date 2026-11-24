@@ -75,3 +75,33 @@ def test_notebook_page_follows_the_template(page: Path) -> None:
         "bundled mock model is the default" not in text
         and "defaults to the bundled mock" not in text
     ), f"{page.name}: stale default-provider sentence"
+
+
+_OUTPUT = re.compile(r"\n## Output\n(?P<body>.*?)<!-- notebook-output:end -->\n", re.DOTALL)
+#: What a pasted run must never carry: where it ran, as whom, and when.
+_IDENTIFYING = re.compile(
+    r"ocid1\.|oraclecloud\.com|opc-request-id|/Users/|/home/|OCI profile:"
+    r"|\b20\d\d-\d\d-\d\d[T ]\d\d:\d\d:\d\d\.\d"
+)
+
+
+@pytest.mark.parametrize("page", PAGES, ids=lambda p: p.stem)
+def test_output_section_is_closed_and_anonymous(page: Path) -> None:
+    """An Output section is one sentence, one fenced block and the end marker.
+
+    Sections captured offline are rewritten by ``scripts/notebook_output.py``;
+    the ones captured from a live model are pasted by hand, so the shape and
+    the absence of anything naming the account, the machine or the moment of
+    the run are checked here for both.
+    """
+    text = page.read_text()
+    if "\n## Output\n" not in text:
+        return
+    match = _OUTPUT.search(text)
+    assert match, f"{page.name}: '## Output' has no '<!-- notebook-output:end -->' marker"
+    body = match.group("body")
+    assert re.fullmatch(r"\n[^\n]+:\n\n(`{3,4})text\n.*\n\1\n", body, re.DOTALL), (
+        f"{page.name}: '## Output' must be one sentence ending in ':' and one fenced text block"
+    )
+    leak = _IDENTIFYING.search(body)
+    assert leak is None, f"{page.name}: the captured output carries {leak.group(0)!r}"
