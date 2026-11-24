@@ -65,8 +65,8 @@ from locus.router.runtime import FrameExtractionError
 
 
 # Opt-in, and marked slow. This file is a benchmark, not a regression test:
-# each of its two tests sweeps the whole 42-prompt corpus through three
-# ablations, so a single run is ~126+ model calls. Against a frontier endpoint
+# each of its two tests sweeps the whole 46-prompt corpus through three
+# ablations, so a single run is ~138+ model calls. Against a frontier endpoint
 # that is merely slow; against a self-hosted one it dominates the suite and
 # looks like a hang — the run stops advancing at this file with nothing to
 # indicate why.
@@ -98,7 +98,7 @@ PROVIDER_LABEL = os.getenv("BENCH_PROVIDER_LABEL", "")
 # shares with ``test_router_classifier_gate.py`` and
 # ``scripts/router_benchmark.py``.
 #
-# 42 labelled prompts across the eight protocols and the ``TaskType`` values
+# 46 labelled prompts across the eight protocols and the ``TaskType`` values
 # they are canonical for. Each is reproducible: same prompt, same expected
 # ``primary_goal`` (the case's ``expected_goal`` metadata), same canonical
 # protocol id (its ``shape:`` tag and expectation).

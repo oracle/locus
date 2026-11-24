@@ -8,6 +8,31 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **The secret scan names what it found.** The gitleaks step in CI runs with
+  `--verbose` next to `--redact`, so a failing run prints the rule id, file,
+  line and commit of each finding while the matched value stays masked; the
+  log used to say only `leaks found: N` (#543, after the proposal in #598 by
+  drawliin).
+- **The Temporal dev-server download no longer fails the unit suite.** The
+  `env` fixture of `tests/unit/test_temporal_durable.py` retries
+  `start_local()` once and then skips the module with the reason, and reads
+  `LOCUS_TEMPORAL_DEV_SERVER_DIR` for the directory the binary is kept in; CI
+  caches that directory per `temporalio` version, so a warm run starts the
+  server without a download (#538).
+- **One short ttl for the live PostgreSQL checkpointer suites.**
+  `POSTGRES_SHORT_TTL` in `tests/integration/conftest.py` replaces the two
+  literals the time-travel and at-rest suites carried for the same reason
+  (the first save on a fresh table stamps the expiry before it runs the
+  DDL); the conformance suite keeps its fast default for in-memory stores
+  (#542).
+- **Router benchmark corpus: at least three labelled cases per goal.**
+  `benchmarks/router/cases.json` gains one `build`, two `modify` and one
+  `monitor` case (64 cases, 46 labelled), and a unit test holds the floor,
+  so no per-goal row of the benchmark table rests on one or two prompts
+  (#540).
+
 ## [6.4.0] - 2026-11-23
 
 ### Added

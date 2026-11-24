@@ -32,6 +32,7 @@ from locus.core.messages import Message
 from locus.core.state import AgentState
 from locus.memory import CheckpointScope, EncryptedSerializer
 from locus.memory.ledger import ToolEffectLedger
+from tests.integration.conftest import POSTGRES_SHORT_TTL
 from tests.unit.checkpointer_time_travel_conformance import _agent, _record_calls
 
 
@@ -221,12 +222,6 @@ async def _rows(dsn: str, table: str, columns: str) -> list[Any]:
         await conn.close()
 
 
-#: The ttl the Postgres at-rest cases save with: long enough that a first save
-#: which also creates the table does not expire before the asserts, short
-#: enough to wait out.
-SHORT_TTL = 1.5
-
-
 @pytest.mark.requires_postgres
 @pytest.mark.skipif(_postgres_dsn() is None, reason="POSTGRES_USER / POSTGRES_DB not set")
 @pytest.mark.usefixtures("_drop_postgres_tables")
@@ -236,13 +231,10 @@ class TestPostgresAtRest:
 
         dsn = _postgres_dsn()
         assert dsn is not None
-        # The first save on a fresh table runs the DDL under an advisory lock
-        # and stamps the expiry before it, so a sub-second ttl can run out
-        # under CI load before the asserts read the row back.
         cp = postgresql_checkpointer(
             dsn=dsn,
             table_name="locus_prod_adapter",
-            ttl=SHORT_TTL,
+            ttl=POSTGRES_SHORT_TTL,
             encryption=EncryptedSerializer(KEY),
             scope=SCOPE,
         )
@@ -269,7 +261,7 @@ class TestPostgresAtRest:
             assert await other.load("t") is None, "no scope: a miss, not a leak"
             await other.close()
 
-            await asyncio.sleep(SHORT_TTL * 1.5)
+            await asyncio.sleep(POSTGRES_SHORT_TTL * 1.5)
             assert await cp.load("t") is None
             assert await cp.expire() == 1
             left = await _rows(dsn, "locus_prod_adapter", "thread_id")
@@ -383,7 +375,7 @@ class TestPostgresAtRest:
         cp = PgCheckpointer(
             dsn,
             table="locus_prod_old",
-            ttl=SHORT_TTL,  # see test_adapter_rows_hold_ciphertext_expiry_and_the_scoped_key
+            ttl=POSTGRES_SHORT_TTL,
             encryption=EncryptedSerializer(KEY),
             scope=SCOPE,
         )
@@ -400,7 +392,7 @@ class TestPostgresAtRest:
             assert await plain.list_threads() == []
             assert await plain.list_threads(scope=SCOPE) == ["t"]
             await plain.close()
-            await asyncio.sleep(SHORT_TTL * 1.5)
+            await asyncio.sleep(POSTGRES_SHORT_TTL * 1.5)
             assert await cp.load("t") is None
             assert await cp.expire() == 1
         finally:

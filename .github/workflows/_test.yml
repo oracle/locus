@@ -50,7 +50,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev,sdk,mysql,pgvector,chroma,mem0]"
 
+      # tests/unit/test_temporal_durable.py starts a local Temporal dev server,
+      # which the SDK downloads on first use. The binary is cached per SDK
+      # version so a warm run starts it without a download; a download that
+      # still fails skips that module instead of failing the job.
+      - name: Read the Temporal SDK version
+        id: temporal
+        run: echo "version=$(python -c 'import temporalio; print(temporalio.__version__)')" >> "$GITHUB_OUTPUT"
+
+      # actions/cache@v5.0.5
+      - name: Cache the Temporal dev server
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae
+        with:
+          path: ${{ runner.temp }}/temporal-dev-server
+          key: temporal-dev-server-${{ runner.os }}-${{ runner.arch }}-${{ steps.temporal.outputs.version }}
+
       - name: Run unit tests with coverage
+        env:
+          LOCUS_TEMPORAL_DEV_SERVER_DIR: ${{ runner.temp }}/temporal-dev-server
         # Hard org-wide gate: ``--cov-fail-under=95`` makes this step (and the
         # job) FAIL when deterministic unit line+branch coverage drops below
         # 95%. It mirrors ``fail_under = 95`` in pyproject.toml
