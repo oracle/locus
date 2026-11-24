@@ -42,6 +42,7 @@ from locus.router import (
     PolicyGate,
     PolicyVerdict,
     Protocol,
+    ProtocolExecutionError,
     ProtocolRegistry,
     Risk,
     Router,
@@ -366,6 +367,40 @@ class TestAdapters:
         )
         result = asyncio.run(runnable.execute("ping"))
         assert result.text == "b"
+
+    def test_pipeline_runnable_raises_when_every_agent_failed(self):
+        async def fake_run(_task: str) -> PipelineResult:
+            return PipelineResult(
+                success=False,
+                outputs=["", ""],
+                final_output="",
+                error="agent[0] BadRequestError: 400; agent[1] BadRequestError: 400",
+            )
+
+        pipeline = MagicMock()
+        pipeline.run = fake_run
+        runnable = PipelineRunnable(
+            pipeline=pipeline, protocol_id="specialist_fanout", frame=_frame()
+        )
+        with pytest.raises(ProtocolExecutionError, match=r"specialist_fanout.*agent\[1\]") as info:
+            asyncio.run(runnable.execute("ping"))
+        assert info.value.protocol_id == "specialist_fanout"
+        assert info.value.detail.startswith("agent[0]")
+
+    def test_pipeline_runnable_keeps_the_text_of_a_partial_failure(self):
+        async def fake_run(_task: str) -> PipelineResult:
+            return PipelineResult(
+                success=False, outputs=["", "b"], final_output="b", error="agent[0] failed"
+            )
+
+        pipeline = MagicMock()
+        pipeline.run = fake_run
+        runnable = PipelineRunnable(
+            pipeline=pipeline, protocol_id="specialist_fanout", frame=_frame()
+        )
+        result = asyncio.run(runnable.execute("ping"))
+        assert result.text == "b"
+        assert result.raw.error == "agent[0] failed"
 
     def test_orchestrator_runnable_normalizes(self):
         async def fake_execute(_task: str, **_kw: Any) -> OrchestratorResult:

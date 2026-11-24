@@ -18,6 +18,7 @@ No live OCI calls — the openai SDK and OCI signers are mocked.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -480,3 +481,107 @@ class TestReasoningEffort:
             reasoning_effort="none", extra_body={"reasoning_effort": "low", "seed": 7}
         )
         assert model.config.extra_body == {"reasoning_effort": "low", "seed": 7}
+
+
+class TestToolsRefusedUnderReasoning:
+    """The chat endpoint's 400 for function tools under reasoning is answered with 'none'."""
+
+    _MESSAGE = (
+        "Function tools with reasoning_effort are not supported for gpt-6-luna in "
+        "/v1/chat/completions. To use function tools, use /v1/responses or set "
+        "reasoning_effort to 'none'"
+    )
+    _TOOLS = [
+        {
+            "type": "function",
+            "function": {"name": "stock", "parameters": {"type": "object", "properties": {}}},
+        }
+    ]
+
+    def _model(self, **kwargs):
+        with patch(
+            "locus.models.providers.oci.openai_compat._load_profile_config",
+            return_value={"tenancy": COMPARTMENT_OCID},
+        ):
+            return OCIChatCompletionsModel(
+                model="openai.gpt-6-luna", profile="MY_PROFILE", **kwargs
+            )
+
+    @staticmethod
+    def _refusal(message: str):
+        import httpx
+        import openai
+
+        response = httpx.Response(
+            400, request=httpx.Request("POST", "https://example.invalid/v1/chat/completions")
+        )
+        return openai.BadRequestError(
+            message, response=response, body={"code": "400", "message": message}
+        )
+
+    @staticmethod
+    def _response(text: str = "17 in stock"):
+        response = MagicMock()
+        response.choices = [MagicMock()]
+        response.choices[0].message.content = text
+        response.choices[0].message.tool_calls = None
+        response.choices[0].finish_reason = "stop"
+        response.usage.prompt_tokens = 5
+        response.usage.completion_tokens = 3
+        return response
+
+    def _wire(self, model, *outcomes):
+        create = AsyncMock(side_effect=list(outcomes))
+        model._client = MagicMock()
+        model._client.chat.completions.create = create
+        return create
+
+    @pytest.mark.asyncio
+    async def test_refusal_is_retried_with_none_and_logged_once(self, caplog):
+        model = self._model()
+        create = self._wire(model, self._refusal(self._MESSAGE), self._response(), self._response())
+        with caplog.at_level(logging.WARNING, logger="locus.models.providers.oci"):
+            result = await model.complete([Message.user("Hi")], tools=self._TOOLS)
+        assert result.message.content == "17 in stock"
+        assert create.call_count == 2
+        assert create.call_args_list[1].kwargs["extra_body"]["reasoning_effort"] == "none"
+        notices = [r for r in caplog.records if "reasoning_effort='none'" in r.getMessage()]
+        assert len(notices) == 1
+        assert notices[0].levelno == logging.WARNING
+        assert "OCIChatCompletionsModel" in notices[0].getMessage()
+        # From now on tools go out with "none" at once, and nothing is said again.
+        caplog.clear()
+        await model.complete([Message.user("Again")], tools=self._TOOLS)
+        assert create.call_count == 3
+        assert create.call_args_list[2].kwargs["extra_body"]["reasoning_effort"] == "none"
+        assert not [r for r in caplog.records if "reasoning_effort" in r.getMessage()]
+
+    @pytest.mark.asyncio
+    async def test_other_400_is_raised(self):
+        import openai
+
+        model = self._model()
+        create = self._wire(model, self._refusal("Unsupported OpenAI operation"))
+        with pytest.raises(openai.BadRequestError):
+            await model.complete([Message.user("Hi")], tools=self._TOOLS)
+        assert create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_without_tools_the_refusal_is_raised(self):
+        import openai
+
+        model = self._model()
+        create = self._wire(model, self._refusal(self._MESSAGE))
+        with pytest.raises(openai.BadRequestError):
+            await model.complete([Message.user("Hi")])
+        assert create.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_already_none_is_not_retried(self):
+        import openai
+
+        model = self._model(reasoning_effort="none")
+        create = self._wire(model, self._refusal(self._MESSAGE))
+        with pytest.raises(openai.BadRequestError):
+            await model.complete([Message.user("Hi")], tools=self._TOOLS)
+        assert create.call_count == 1
