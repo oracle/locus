@@ -169,7 +169,8 @@ def measure_difficulty(
 
     A case is ``low`` when the first tier passed it, ``medium`` when a later
     tier did, and ``high`` when every tier failed it. A tier that was not
-    graded for a case (the judge abstained, the answer errored) decides
+    graded for a case (the judge abstained on every reading, or the model
+    raised on any reading, whatever the other readings said) decides
     nothing: the case is :data:`NOT_MEASURED` unless a graded tier already
     settled it.
 
