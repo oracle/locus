@@ -5,7 +5,7 @@ They span the domains where agents act — support, payments, infrastructure,
 and data. The snippets below are the smallest possible shapes; the numbered
 `notebook_*.py` files build them out.
 
-**A note on the numbers.** The series runs `01-80`, ordered by topic: start here, the multi-agent shapes, Oracle Cloud and Database 26ai, the harness, observability and serving, the control layer, then real-world workflows. Numbers are never reused. The gate notebooks (71-75) need no credentials at all; the [documentation](https://locusagents.ai/notebooks/) lists every notebook in this order.
+**A note on the numbers.** The series runs `01-81`, ordered by topic: start here, the multi-agent shapes, Oracle Cloud and Database 26ai, the harness, observability and serving, the control layer, real-world workflows, then benchmarks. Numbers are never reused. The gate notebooks (71-75) need no credentials at all; the [documentation](https://locusagents.ai/notebooks/) lists every notebook in this order.
 
 ## Start here
 
