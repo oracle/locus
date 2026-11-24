@@ -23,6 +23,26 @@ policy.
   An agent on any of them through `oci:<vendor>.<model>` counts tokens
   against the real window, and `max_cost_usd` prices the OpenAI ones.
 
+### Fixed
+
+- **`register_metadata` stores an entry under the key lookup uses.** A
+  record registered under a prefixed id (`oci:openai.gpt-5.5`, the recipe
+  the observability page gives for pricing an OCI-served model at OCI's
+  rate) was never found: `metadata_for` strips the provider prefix before
+  it searches, so the registered key did not match and the built-in record
+  of the model the id serves answered instead. The prefix is now stripped at
+  registration too, so the entry is found under every spelling of the id
+  and wins over the built-in record; an unknown prefix stays part of the
+  slug.
+
+### Documentation
+
+- The observability page's paragraph on `cost_usd` said an OCI id had no
+  entry and no price until registered; OCI ids have resolved the served
+  model's entry since the catalogue learned them, and the OpenAI line
+  carries list prices. It now says which OCI-served models are priced,
+  which carry only a window, and how a registered rate takes precedence.
+
 ## [6.6.0] - 2026-11-24
 
 ### Added

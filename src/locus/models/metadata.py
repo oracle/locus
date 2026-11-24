@@ -178,10 +178,22 @@ def register_metadata(md: ModelMetadata) -> None:
 
     Call at import time from user code to add fine-tunes, regional
     aliases, or self-hosted models that Locus doesn't ship
-    seed data for.
+    seed data for, or to price a model at the rate your route bills
+    (an OCI id such as ``"oci:openai.gpt-5.5"`` at OCI's rate rather
+    than the vendor's list price).
+
+    The entry is stored under the same key :func:`metadata_for` looks up:
+    a provider prefix Locus knows (``openai:``, ``oci:``, ``openrouter:``
+    and the rest) is stripped, so ``"oci:openai.gpt-5.5"`` and
+    ``"openai.gpt-5.5"`` name one entry, and that entry wins over the
+    built-in record of the model the OCI id serves (``gpt-5.5``). An
+    unknown prefix is part of the slug and is kept.
     """
+    key = _strip_prefix(md.model_id.strip())
+    if key != md.model_id:
+        md = md.model_copy(update={"model_id": key})
     with _lock:
-        _registry[md.model_id] = md
+        _registry[key] = md
 
 
 def metadata_for(model_id: str) -> ModelMetadata | None:
