@@ -17,6 +17,16 @@ policy.
   `ProtocolExecutionError`, as a pipeline that produced no finding already
   did, and the dispatcher publishes it as `router.runnable.failed`.
 
+### Documentation
+
+- **Notebook 81, the router benchmark.** A runnable walk through the routing
+  corpus on an eleven-case sample: two classifiers through the router's front
+  seam (the corpus's own frame as the ceiling, and a rule that reads the
+  first verb and falls for the traps), the pass rate per tag and the gate
+  that names the regressed cases, with no model; then, on a live model, the
+  typed router against the free-form baseline and difficulty measured from
+  outcomes.
+
 ## [6.6.1] - 2026-11-24
 
 ### Added
@@ -58,13 +68,6 @@ policy.
 
 ### Documentation
 
-- **Notebook 81, the router benchmark.** A runnable walk through the routing
-  corpus on an eleven-case sample: two classifiers through the router's front
-  seam (the corpus's own frame as the ceiling, and a rule that reads the
-  first verb and falls for the traps), the pass rate per tag and the gate
-  that names the regressed cases, with no model; then, on a live model, the
-  typed router against the free-form baseline and difficulty measured from
-  outcomes.
 - The observability page's paragraph on `cost_usd` said an OCI id had no
   entry and no price until registered; OCI ids have resolved the served
   model's entry since the catalogue learned them, and the OpenAI line
