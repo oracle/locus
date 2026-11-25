@@ -13,11 +13,12 @@ Declarative patterns for composing agents:
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from locus.core import sources
 
 
 async def _arun_agent(agent: Any, prompt: str) -> Any:
@@ -81,7 +82,7 @@ class SequentialPipeline(BaseModel):
             emit,
         )
 
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
         outputs: list[str] = []
         current_input = task
 
@@ -94,7 +95,7 @@ class SequentialPipeline(BaseModel):
                         task=task,
                     )
 
-                stage_started = time.perf_counter()
+                stage_started = sources.monotonic()
                 await emit(
                     EV_PIPELINE_STAGE_STARTED,
                     pipeline_kind="sequential",
@@ -111,7 +112,7 @@ class SequentialPipeline(BaseModel):
                         pipeline_kind="sequential",
                         stage=i,
                         output_length=0,
-                        duration_ms=(time.perf_counter() - stage_started) * 1000,
+                        duration_ms=(sources.monotonic() - stage_started) * 1000,
                         success=False,
                         error=type(e).__name__,
                     )
@@ -123,11 +124,11 @@ class SequentialPipeline(BaseModel):
                     pipeline_kind="sequential",
                     stage=i,
                     output_length=len(output),
-                    duration_ms=(time.perf_counter() - stage_started) * 1000,
+                    duration_ms=(sources.monotonic() - stage_started) * 1000,
                     success=True,
                 )
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             return PipelineResult(
                 success=True,
                 outputs=outputs,
@@ -136,7 +137,7 @@ class SequentialPipeline(BaseModel):
             )
 
         except Exception as e:  # noqa: BLE001
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             return PipelineResult(
                 success=False,
                 outputs=outputs,
@@ -185,7 +186,7 @@ class ParallelPipeline(BaseModel):
             emit,
         )
 
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
         await emit(
             EV_PIPELINE_FANOUT_STARTED,
             agent_count=len(self.agents),
@@ -220,7 +221,7 @@ class ParallelPipeline(BaseModel):
         else:
             final = self.separator.join(o for o in outputs if o)
 
-        duration_ms = (time.perf_counter() - start_time) * 1000
+        duration_ms = (sources.monotonic() - start_time) * 1000
         await emit(
             EV_PIPELINE_FANOUT_COMPLETED,
             agents_succeeded=len(self.agents) - len(agent_errors),
@@ -275,13 +276,13 @@ class LoopAgent(BaseModel):
             emit,
         )
 
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
         outputs: list[str] = []
         current_input = task
         terminated_by = "max_loops"
         try:
             for i in range(self.max_loops):
-                iteration_started = time.perf_counter()
+                iteration_started = sources.monotonic()
                 await emit(
                     EV_LOOP_ITERATION_STARTED,
                     iteration=i,
@@ -295,7 +296,7 @@ class LoopAgent(BaseModel):
                         iteration=i,
                         output_length=0,
                         condition_met=False,
-                        duration_ms=(time.perf_counter() - iteration_started) * 1000,
+                        duration_ms=(sources.monotonic() - iteration_started) * 1000,
                         success=False,
                         error=type(e).__name__,
                     )
@@ -308,7 +309,7 @@ class LoopAgent(BaseModel):
                     iteration=i,
                     output_length=len(output),
                     condition_met=stopped,
-                    duration_ms=(time.perf_counter() - iteration_started) * 1000,
+                    duration_ms=(sources.monotonic() - iteration_started) * 1000,
                     success=True,
                 )
 
@@ -324,7 +325,7 @@ class LoopAgent(BaseModel):
                         task=task,
                     )
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             await emit(
                 EV_LOOP_TERMINATED,
                 terminated_by=terminated_by,
@@ -339,7 +340,7 @@ class LoopAgent(BaseModel):
             )
 
         except Exception as e:  # noqa: BLE001
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             return PipelineResult(
                 success=False,
                 outputs=outputs,

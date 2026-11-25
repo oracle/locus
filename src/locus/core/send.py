@@ -41,9 +41,10 @@ Example - Conditional fan-out:
 from __future__ import annotations
 
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from locus.core import sources
 
 
 class Send(BaseModel):
@@ -72,7 +73,7 @@ class Send(BaseModel):
 
     node: str
     payload: dict[str, Any] = Field(default_factory=dict)
-    send_id: str = Field(default_factory=lambda: f"send_{uuid4().hex[:8]}")
+    send_id: str = Field(default_factory=lambda: f"send_{sources.uuid4().hex[:8]}")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"frozen": True}

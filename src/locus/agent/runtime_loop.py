@@ -29,9 +29,8 @@ import contextvars
 import functools
 import logging
 import threading
-import time
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -54,6 +53,7 @@ from locus.agent.verification import (
     is_ephemeral_message,
     mark_ephemeral,
 )
+from locus.core import sources
 from locus.core.events import (
     CompactionEvent,
     CustomEvent,
@@ -731,7 +731,7 @@ class AgentRuntimeMixin:
             return
         attached: set[int] = self._mcp_attached_ids
         retry_at: dict[int, float] = self._mcp_retry_at
-        now = time.monotonic()
+        now = sources.monotonic()
 
         for client in servers:
             key = id(client)
@@ -902,7 +902,7 @@ class AgentRuntimeMixin:
             rc.checkpoints.parent_checkpoint_id = from_checkpoint
 
         # Track metrics
-        started_at = datetime.now(UTC)
+        started_at = sources.now()
         # Whether the run has had its one note to converge (``budget_nudge_at``).
         _budget_nudged = False
         _total_tokens = 0
@@ -975,7 +975,7 @@ class AgentRuntimeMixin:
 
                 # Check time budget
                 if self.config.time_budget_seconds is not None:
-                    elapsed = (datetime.now(UTC) - started_at).total_seconds()
+                    elapsed = (sources.now() - started_at).total_seconds()
                     if elapsed >= self.config.time_budget_seconds:
                         yield TerminateEvent(
                             reason="time_budget",
@@ -1681,7 +1681,7 @@ class AgentRuntimeMixin:
                         integrity=rc.integrity,
                         ledger=rc.ledger,
                     )
-                    batch_start = time.perf_counter()
+                    batch_start = sources.monotonic()
                     interrupted_slot_idx: int | None = None
                     results_stream = self._executor.execute_streaming(
                         to_execute_calls,
@@ -1725,7 +1725,7 @@ class AgentRuntimeMixin:
                                 interrupted_slot_idx = slot_idx
                                 break
                     except Exception as e:  # noqa: BLE001 — ``_execute_one`` already traps user-tool exceptions; this catches a failure of the executor itself (registry blow-up, ctx_factory error) so a single bad call doesn't abort the whole turn.
-                        batch_duration = (time.perf_counter() - batch_start) * 1000
+                        batch_duration = (sources.monotonic() - batch_start) * 1000
                         for slot_idx, tc in zip(to_execute_indices, to_execute_calls, strict=True):
                             if slots[slot_idx]["result"] is None:
                                 slots[slot_idx]["result"] = ToolResult(
@@ -2105,7 +2105,7 @@ class AgentRuntimeMixin:
             self._end_run(rc, state)
 
             # Run hooks: after_invocation
-            _duration_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000  # noqa: F841
+            _duration_ms = (sources.now() - started_at).total_seconds() * 1000  # noqa: F841
             await self._run_after_invocation_hooks(state, len(state.errors) == 0)
 
             # Extract and persist long-term memories from this session.
@@ -2139,7 +2139,7 @@ class AgentRuntimeMixin:
         # Tools get the persisted half; ephemeral keys ride on ``rc``.
         metadata, _ = self._split_run_metadata(metadata)
 
-        started_at = datetime.now(UTC)
+        started_at = sources.now()
         # Whether the run has had its one note to converge (``budget_nudge_at``).
         _budget_nudged = False
         _total_tokens = 0
@@ -2192,7 +2192,7 @@ class AgentRuntimeMixin:
                 _open_iteration = state.iteration
 
                 if self.config.time_budget_seconds is not None:
-                    elapsed = (datetime.now(UTC) - started_at).total_seconds()
+                    elapsed = (sources.now() - started_at).total_seconds()
                     if elapsed >= self.config.time_budget_seconds:
                         yield TerminateEvent(
                             reason="time_budget",
@@ -2434,7 +2434,7 @@ class AgentRuntimeMixin:
                     modified_args = tool_event.arguments
                     invoke_args = _invocation_arguments(tool_event)
 
-                    start_time = time.perf_counter()
+                    start_time = sources.monotonic()
                     try:
                         ctx_factory = ToolContextFactory(
                             run_id=state.run_id,
@@ -2501,7 +2501,7 @@ class AgentRuntimeMixin:
                             name=tc.name,
                             content="",
                             error=str(e),
-                            duration_ms=(time.perf_counter() - start_time) * 1000,
+                            duration_ms=(sources.monotonic() - start_time) * 1000,
                         )
 
                     if rc.integrity is not None:
@@ -2753,9 +2753,7 @@ class AgentRuntimeMixin:
             and not self.config.keep_iteration_checkpoints
             and getattr(checkpointer, "deletes_single_checkpoints", False) is True
         ):
-            from uuid import uuid4  # noqa: PLC0415
-
-            checkpoint_id = uuid4().hex
+            checkpoint_id = sources.uuid4().hex
             pending = list(state.metadata.get(ITERATION_CHECKPOINTS_KEY) or [])
             state = state.with_metadata(ITERATION_CHECKPOINTS_KEY, [*pending, checkpoint_id])
         if writer is not None:
@@ -2829,7 +2827,7 @@ class AgentRuntimeMixin:
                 )
             )
         if self.config.time_budget_seconds:
-            elapsed = (datetime.now(UTC) - started_at).total_seconds()
+            elapsed = (sources.now() - started_at).total_seconds()
             used.append(
                 (
                     elapsed / self.config.time_budget_seconds,

@@ -26,10 +26,11 @@ Example:
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
+from locus.core import sources
 
 
 if TYPE_CHECKING:
@@ -149,8 +150,8 @@ class TimeLimit(TerminationCondition):
 
     def check(self, state: AgentState, **context: Any) -> tuple[bool, str | None]:
         if self._start is None:
-            self._start = time.time()
-        if time.time() - self._start >= self._seconds:
+            self._start = sources.time()
+        if sources.time() - self._start >= self._seconds:
             return True, "time_budget"
         return False, None
 

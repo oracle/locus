@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal, TypeVar, get_args
 
 from pydantic import BaseModel, Field, computed_field
 
+from locus.core import sources
 from locus.core.messages import Message
 from locus.core.state import AgentState, ReasoningStep, ToolExecution
 
@@ -144,12 +145,12 @@ class AgentResult(BaseModel):
 
     # Timing
     started_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=sources.now,
         description="When execution started",
     )
 
     completed_at: datetime = Field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=sources.now,
         description="When execution completed",
     )
 
@@ -339,7 +340,7 @@ class AgentResult(BaseModel):
             stop_reason=stop_reason,
             metrics=metrics or ExecutionMetrics(),
             started_at=started_at or state.started_at,
-            completed_at=datetime.now(UTC),
+            completed_at=sources.now(),
             error=error,
             grounding_score=grounding_score,
             ungrounded_claims=ungrounded_claims or [],

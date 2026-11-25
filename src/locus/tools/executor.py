@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import re
-import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from locus.core import sources
 from locus.core.messages import ToolCall, ToolResult
 from locus.memory.ledger import RunLedger
 from locus.tools.context import ToolContext, bind_tool_context
@@ -447,7 +447,7 @@ class SequentialExecutor(ToolExecutor):
         ctx_factory: ToolContextFactory | None,
     ) -> ToolResult:
         """Execute a single tool call."""
-        start = time.perf_counter()
+        start = sources.monotonic()
         if tool_call.malformed_arguments is not None:
             return _malformed_arguments_result(tool_call)
         refusal = await _integrity_refusal(tool_call, ctx_factory)
@@ -475,14 +475,14 @@ class SequentialExecutor(ToolExecutor):
             with bind_tool_context(bound):
                 result = await tool.execute(ctx=ctx, **tool_call.arguments)
 
-            duration = (time.perf_counter() - start) * 1000
+            duration = (sources.monotonic() - start) * 1000
 
             return await _ledger_record(
                 tool_call, tool_result_from_output(tool_call, result, duration), ctx_factory
             )
 
         except Exception as e:  # noqa: BLE001
-            duration = (time.perf_counter() - start) * 1000
+            duration = (sources.monotonic() - start) * 1000
             error_type = type(e).__name__
             error_msg = _sanitize_error(str(e))
             return await _ledger_record(
@@ -595,7 +595,7 @@ class ConcurrentExecutor(ToolExecutor):
         ctx_factory: ToolContextFactory | None,
     ) -> ToolResult:
         """Execute a single tool call."""
-        start = time.perf_counter()
+        start = sources.monotonic()
         if tool_call.malformed_arguments is not None:
             return _malformed_arguments_result(tool_call)
         refusal = await _integrity_refusal(tool_call, ctx_factory)
@@ -620,14 +620,14 @@ class ConcurrentExecutor(ToolExecutor):
             with bind_tool_context(bound):
                 result = await tool.execute(ctx=ctx, **tool_call.arguments)
 
-            duration = (time.perf_counter() - start) * 1000
+            duration = (sources.monotonic() - start) * 1000
 
             return await _ledger_record(
                 tool_call, tool_result_from_output(tool_call, result, duration), ctx_factory
             )
 
         except Exception as e:  # noqa: BLE001
-            duration = (time.perf_counter() - start) * 1000
+            duration = (sources.monotonic() - start) * 1000
             error_type = type(e).__name__
             error_msg = _sanitize_error(str(e))
             return await _ledger_record(

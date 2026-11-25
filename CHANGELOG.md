@@ -8,6 +8,20 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A seam for the loop's clock, ids and randomness.** The agent loop read
+  `time`, `datetime.now`, `uuid4` and `random` directly, so a host that
+  replays the loop, such as a Temporal workflow, could not make a replayed run
+  read the values the first run read. `locus.core`, `locus.agent` and the tool
+  executor now read them through `locus.core.sources` (`now`, `time`,
+  `monotonic`, `uuid4`, `uniform`), and `sources.set_sources(...)` installs a
+  host's own `RuntimeSources`. Nothing changes without that call:
+  `SystemSources` is the system clock and random ids. Durations in these
+  modules are all measured on one clock, `sources.monotonic()`. A unit test
+  fails when one of these modules reads the clock, an id or a random number
+  directly.
+
 ## [6.7.0] - 2026-11-25
 
 ### Changed
