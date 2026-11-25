@@ -5,16 +5,9 @@ message in the conversation, every tool call and its result, the
 running confidence score, the iteration counter, and a free-form
 metadata dict for application code.
 
-It's an **immutable Pydantic model**: every mutation returns a new
-instance, every collection is a `tuple` or `frozenset`, and the whole
-thing round-trips through JSON without loss. That immutability is
-load-bearing — it is why checkpoints are reproducible, why two
-parallel branches in a graph can each "modify" the state without
-interfering with each other, and why a hook reading
-`state.tool_executions` cannot accidentally corrupt the run. Here is
-one iteration of the agent loop seen from the state's side: each node
-takes the current `AgentState` and returns a new one, hooks read it,
-and the checkpointer saves it at its save points.
+It's an **immutable Pydantic model**: every mutation returns a new instance, every collection is a `tuple` or `frozenset`, and the whole thing round-trips through JSON without loss. That immutability is load-bearing — it is why checkpoints are reproducible, why two parallel branches in a graph can each "modify" the state without interfering with each other, and why a hook reading `state.tool_executions` cannot accidentally corrupt the run.
+
+Here is one iteration of the agent loop seen from the state's side: each node takes the current `AgentState` and returns a new one, hooks read it, and the checkpointer saves it at its save points.
 
 {{ locus_diagram state-flow }}
 

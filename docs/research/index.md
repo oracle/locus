@@ -1,14 +1,10 @@
 # Research
 
-Findings from building the SDK's control layer — the policy gate, approvals and
-audit trail that decide which of an agent's actions may run.
-Everything here comes from running code against real catalogs, real tools and
-real models. The method and the scoring code are public and runnable against
-your own endpoint; where a result depends on a model or a corpus we do not
-redistribute, the page says so, and where a result is a single illustration
-rather than a benchmark, it says that too. The evaluations, and the training
-of Clusiana-Admit-4B, ran on the authors' own accounts, API keys and rented
-GPUs.
+Findings from building the SDK's control layer — the policy gate, approvals and audit trail that decide which of an agent's actions may run.
+
+Everything here comes from running code against real catalogs, real tools and real models. The method and the scoring code are public and runnable against your own endpoint.
+
+Where a result depends on a model or a corpus we do not redistribute, the page says so, and where a result is a single illustration rather than a benchmark, it says that too. The evaluations, and the training of Clusiana-Admit-4B, ran on the authors' own accounts, API keys and rented GPUs.
 
 ## Related work
 

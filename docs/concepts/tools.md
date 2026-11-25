@@ -4,32 +4,15 @@ title: Tools
 
 # Tools
 
-Tools are how an agent
-affects the world. The model decides *"call `lookup_order` with order_id='ord-4821'"*;
-the SDK runs your `lookup_order` function, captures the return value, and
-feeds it back. From your side, a tool is **a regular Python function
-with an `@tool` decorator** — the SDK introspects the signature and
-docstring to build the schema the model sees. The drawing follows that
-round trip: `@tool` reads the signature and docstring into a `Tool` with
-a JSON schema, the `ToolRegistry` offers it to the model, and a call
-comes back through the executor, your function and a `ToolResult`,
-cut to size when it is too long, to the observation the model reads
-next.
+Tools are how an agent affects the world. The model decides *"call `lookup_order` with order_id='ord-4821'"*; the SDK runs your `lookup_order` function, captures the return value, and feeds it back. From your side, a tool is **a regular Python function with an `@tool` decorator** — the SDK introspects the signature and docstring to build the schema the model sees.
+
+The drawing follows that round trip: `@tool` reads the signature and docstring into a `Tool` with a JSON schema, the `ToolRegistry` offers it to the model, and a call comes back through the executor, your function and a `ToolResult`, cut to size when it is too long, to the observation the model reads next.
 
 {{ locus_diagram tool-pipeline }}
 
-Two parts of the drawing have no section of their own on this page. A
-function that declares a `ctx: ToolContext` parameter receives the
-call's `run_id`, `iteration`, `state` and invocation metadata, and that
-parameter is left out of the schema the model sees; see
-[Accessing context](../how-to/custom-tools.md#accessing-context) and
-the [`ToolContext` reference](../api/tools.md#tool-context). A result
-longer than [`max_tool_result_length`](../api/agent.md#agentconfig) is
-cut to its head and tail around a marker that says how much was removed.
-With a `tool_result_store` configured it is stored whole and a reference
-key is inlined instead; with the ObservationPack on it goes whole up to
-the pack's inline limit and above that is archived whole and sent cut
-around a pointer to the archive.
+Two parts of the drawing have no section of their own on this page. A function that declares a `ctx: ToolContext` parameter receives the call's `run_id`, `iteration`, `state` and invocation metadata, and that parameter is left out of the schema the model sees; see [Accessing context](../how-to/custom-tools.md#accessing-context) and the [`ToolContext` reference](../api/tools.md#tool-context).
+
+A result longer than [`max_tool_result_length`](../api/agent.md#agentconfig) is cut to its head and tail around a marker that says how much was removed. With a `tool_result_store` configured it is stored whole and a reference key is inlined instead; with the ObservationPack on it goes whole up to the pack's inline limit and above that is archived whole and sent cut around a pointer to the archive.
 
 This is the seam most production code touches. Get tools right and
 the rest of the framework gets out of your way.
@@ -150,19 +133,16 @@ If your tools have side effects that must be ordered, switch to
 
 ### Error handling — tool failures don't crash the agent
 
-If a tool raises, the loop catches the exception and turns it into a
-`ToolResult` whose `error` is `f"{type(exc).__name__}: {message}"` —
-first line only, with common secret patterns (`postgresql://`, `redis://`,
-`mongodb://` and `mysql://` URLs, `password=`/`api_key=`/`token=`
-assignments, well-known vendor key prefixes, `Authorization: Bearer`
-values, JWTs, home-directory paths) redacted or masked on a best-effort
-basis — then feeds that back into the next model turn. The redaction is
-pattern-based: a `postgres://` URL or an unrecognised key format passes
-through unchanged, so keep secrets out of exception messages.
-(`ToolResult.success` is a read-only property derived from
-`error` — it's `True` when `error is None`, not something you set.) The
-model sees the failure and can react: retry, try a different tool, or
-report to the user.
+If a tool raises, the loop catches the exception and turns it into a `ToolResult` whose `error` is `f"{type(exc).__name__}: {message}"` — first line only, with common secret patterns redacted or masked on a best-effort basis — then feeds that back into the next model turn. The redacted patterns are:
+
+- `postgresql://`, `redis://`, `mongodb://` and `mysql://` URLs
+- `password=`/`api_key=`/`token=` assignments
+- well-known vendor key prefixes
+- `Authorization: Bearer` values
+- JWTs
+- home-directory paths
+
+The redaction is pattern-based: a `postgres://` URL or an unrecognised key format passes through unchanged, so keep secrets out of exception messages. (`ToolResult.success` is a read-only property derived from `error` — it's `True` when `error is None`, not something you set.) The model sees the failure and can react: retry, try a different tool, or report to the user.
 
 ```python
 @tool

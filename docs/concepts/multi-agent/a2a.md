@@ -67,18 +67,9 @@ server = A2AServer(
 server.run(host="0.0.0.0", port=7421)  # HTTP on 7421, gRPC on 7422
 ```
 
-Client side, `A2AClient(url)` speaks JSON-RPC at `url`;
-`A2AClient(url, binding="http+json")` or `binding="grpc"` speaks one
-other binding. `A2AClient.connect(url, prefer=[...])` (or
-`A2AClient.from_card(card, prefer=[...])`) reads the card and orders the
-advertised interfaces by `prefer` — `["JSONRPC", "HTTP+JSON", "GRPC"]`
-when not given. If the preferred interface proves unreachable
-(connection refused, 404, 405, 501, gRPC `UNAVAILABLE` or
-`UNIMPLEMENTED`), the client moves on to the next one and stays there;
-`client.binding` says which it is using. A card that advertises no
-usable interface falls back to JSON-RPC at the card's `url`. An interface
-whose binding needs a package that is not installed (gRPC without
-`grpcio`) is skipped.
+Client side, `A2AClient(url)` speaks JSON-RPC at `url`; `A2AClient(url, binding="http+json")` or `binding="grpc"` speaks one other binding. `A2AClient.connect(url, prefer=[...])` (or `A2AClient.from_card(card, prefer=[...])`) reads the card and orders the advertised interfaces by `prefer` — `["JSONRPC", "HTTP+JSON", "GRPC"]` when not given.
+
+If the preferred interface proves unreachable (connection refused, 404, 405, 501, gRPC `UNAVAILABLE` or `UNIMPLEMENTED`), the client moves on to the next one and stays there; `client.binding` says which it is using. A card that advertises no usable interface falls back to JSON-RPC at the card's `url`. An interface whose binding needs a package that is not installed (gRPC without `grpcio`) is skipped.
 
 ```python
 client = await A2AClient.connect(
@@ -89,17 +80,9 @@ print(client.binding)  # GRPC, if the card advertises it and grpcio is installed
 
 ### Push notifications
 
-A task that outlives the request that created it can call the client
-back. The client registers a `TaskPushNotificationConfig` — a webhook
-`url`, a `token` the server echoes back, and optionally the
-`authentication` (`scheme` and `credentials`) the server must present —
-either in the `SendMessage` configuration or afterwards with
-`CreateTaskPushNotificationConfig`. The server then `POST`s a
-`StreamResponse` (`statusUpdate` or `artifactUpdate`) to the URL on every
-change, as `application/a2a+json`, with `X-A2A-Notification-Token` and
-the configured `Authorization` header. Delivery is best effort: a failure
-is retried with back-off and logged by task id, config id and host, never
-with the token or the credentials.
+A task that outlives the request that created it can call the client back. The client registers a `TaskPushNotificationConfig` — a webhook `url`, a `token` the server echoes back, and optionally the `authentication` (`scheme` and `credentials`) the server must present — either in the `SendMessage` configuration or afterwards with `CreateTaskPushNotificationConfig`.
+
+The server then `POST`s a `StreamResponse` (`statusUpdate` or `artifactUpdate`) to the URL on every change, as `application/a2a+json`, with `X-A2A-Notification-Token` and the configured `Authorization` header. Delivery is best effort: a failure is retried with back-off and logged by task id, config id and host, never with the token or the credentials.
 
 Push notifications are off until the server is given
 `push_notifications=PushNotificationSettings(...)` (or `True` for the
@@ -176,20 +159,16 @@ to `input-required` and the status message carries the question. Its
 | A question (`ask_user`) | `question` | `interruptId`, `options`, `fields` when the question declares them |
 | An approval hold | `approval` | `interruptId`, `approvalId`, `hold` (the action, asset, principal, reason, arguments and approvers so far), `replies: ["approve", "deny"]` |
 
-The peer answers by sending a message on the same task
-(`taskId` set). The run resumes through `Agent.resume()` with the
-message's text — for a question, as the answer; for a hold, the first
-word decides it: `approve` (also `yes`, `allow`, `ok`, ...) or `deny`
-(`reject`, `no`, `refuse`, ...). Anything else is refused with
-`InvalidParams` and the task stays paused. Give the server the agent's
-approval store (`A2AServer(..., approvals=store)`) and the peer's verdict
-is recorded on the approval first, under `metadata.decidedBy` on the
-reply when set (`a2a:<contextId>` otherwise), so the store's authority
-rules and the audit trail see who decided; the held call is then
-re-issued under that decision. Without `approvals=`, the reply only
-resumes the run and the gate acts on whatever the store holds: a hold
-still undecided answers `UnsupportedOperation` and keeps the task paused
-until someone decides it (`locus approvals approve ...`).
+The peer answers by sending a message on the same task (`taskId` set). The run resumes through `Agent.resume()` with the message's text:
+
+- for a question, as the answer
+- for a hold, the first word decides it: `approve` (also `yes`, `allow`, `ok`, ...) or `deny` (`reject`, `no`, `refuse`, ...)
+
+Anything else is refused with `InvalidParams` and the task stays paused.
+
+Give the server the agent's approval store (`A2AServer(..., approvals=store)`) and the peer's verdict is recorded on the approval first, under `metadata.decidedBy` on the reply when set (`a2a:<contextId>` otherwise), so the store's authority rules and the audit trail see who decided; the held call is then re-issued under that decision.
+
+Without `approvals=`, the reply only resumes the run and the gate acts on whatever the store holds: a hold still undecided answers `UnsupportedOperation` and keeps the task paused until someone decides it (`locus approvals approve ...`).
 
 An approved hold performs the call once and the task runs on to
 `completed`. A denied hold refuses the call and ends the task in

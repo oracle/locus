@@ -154,16 +154,11 @@ returns the same `AgentTrace`.
 | `assert_tool_offered(name)` | `name` was offered to the model on the first turn |
 | `assert_succeeded()` | The run reported no error and no tool raised |
 
-A call counts once the agent sends it, whether or not the tool body runs. A
-call that a hook cancelled, or that `gate_tool` refused with its default
-`on_refusal="return"`, still appears in the trace, and `assert_succeeded()`
-still passes. `assert_tool_not_called` fails for such a call just as it does
-for one that ran, so it is the wrong check for a gate. To test a gate, assert
-on the refusal the call returned (`trace.result.tool_executions`) or on the
-audit trail. The exception is a call that pauses the run — `ask_user`, or a
-hold under `gate_tool(..., on_refusal="interrupt")`: the run stops before that
-call is recorded, so it is not in the trace and `assert_tool_not_called`
-passes.
+A call counts once the agent sends it, whether or not the tool body runs. A call that a hook cancelled, or that `gate_tool` refused with its default `on_refusal="return"`, still appears in the trace, and `assert_succeeded()` still passes.
+
+`assert_tool_not_called` fails for such a call just as it does for one that ran, so it is the wrong check for a gate. To test a gate, assert on the refusal the call returned (`trace.result.tool_executions`) or on the audit trail.
+
+The exception is a call that pauses the run — `ask_user`, or a hold under `gate_tool(..., on_refusal="interrupt")`: the run stops before that call is recorded, so it is not in the trace and `assert_tool_not_called` passes.
 
 Each assertion returns the trace, so they chain, and a failure reports what
 did happen — `expected tool 'issue_refund' to be called, but the agent called:

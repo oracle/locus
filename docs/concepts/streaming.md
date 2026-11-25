@@ -1,14 +1,8 @@
 # Streaming
 
-Every agent emits a typed event stream as it runs — a live,
-ordered trace of what the agent is doing. Each step (every model call,
-every tool call such as `issue_refund` or `deploy_service`) lands as a
-timestamped event the instant it happens, in the order it happened. The
-stream is the surface you render in a UI, forward to telemetry, and
-replay in original order when reviewing a run. (It is a faithful trace,
-not a tamper-evident ledger — for a hash-chained record of decisions,
-where each entry commits to the one before it,
-route them through the [`AuditTrail`](control-layer.md).)
+Every agent emits a typed event stream as it runs — a live, ordered trace of what the agent is doing. Each step (every model call, every tool call such as `issue_refund` or `deploy_service`) lands as a timestamped event the instant it happens, in the order it happened.
+
+The stream is the surface you render in a UI, forward to telemetry, and replay in original order when reviewing a run. (It is a faithful trace, not a tamper-evident ledger — for a hash-chained record of decisions, where each entry commits to the one before it, route them through the [`AuditTrail`](control-layer.md).)
 
 The events are frozen Pydantic classes — not strings, not
 `dict[str, Any]` blobs — designed to drop into a `match` statement that

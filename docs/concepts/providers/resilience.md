@@ -67,16 +67,13 @@ model = FallbackChain(
 agent = Agent(model=model)
 ```
 
-Tiers are tried in order, one attempt each. A failure whose reason is in
-`HEALTH_REASONS` (`rate_limit`, `overloaded`, `server_error`, `timeout`,
-`auth_transient`, `auth_permanent`, `billing`, `model_not_found`) says the
-provider is unwell: the call moves to the next tier and the failure counts
-against the tier's breaker. A `format_error` also moves the call on, because
-the classifier sets `should_fallback` for it, but does not count against the
-breaker. Any other reason (`context_too_long`, `payload_too_large`, `unknown`)
-is re-raised at once without trying another tier: the same request would fail
-the same way elsewhere, or the classifier could not place the failure. Pass
-`should_fallback`, a callable `(exc, decision) -> bool`, to change the policy.
+Tiers are tried in order, one attempt each. What a failure does depends on its reason:
+
+- A failure whose reason is in `HEALTH_REASONS` (`rate_limit`, `overloaded`, `server_error`, `timeout`, `auth_transient`, `auth_permanent`, `billing`, `model_not_found`) says the provider is unwell: the call moves to the next tier and the failure counts against the tier's breaker.
+- A `format_error` also moves the call on, because the classifier sets `should_fallback` for it, but does not count against the breaker.
+- Any other reason (`context_too_long`, `payload_too_large`, `unknown`) is re-raised at once without trying another tier: the same request would fail the same way elsewhere, or the classifier could not place the failure.
+
+Pass `should_fallback`, a callable `(exc, decision) -> bool`, to change the policy.
 
 Each tier's breaker opens after `failure_threshold` health failures within
 `window_s` seconds, skips the tier for `cooldown_s` seconds, then goes
@@ -98,22 +95,13 @@ in the counters on `FallbackChain.metrics`.
 
 ### Retries around the chain
 
-Retries wrap the chain, not a tier. The agent loop wraps every model call in
-`call_with_retry`, governed by
-[`AgentConfig.model_retry`](../../api/agent.md#agentconfig), a
-`ModelRetryConfig` that is on by default: when the error that leaves the chain
-classifies as `rate_limit`, `overloaded`, `server_error` or `timeout`, the loop
-waits (the provider's `retry-after` when it sends one, otherwise an exponential
-backoff with full jitter) and calls the chain again from the top, up to
-`max_retries` times within `total_budget_seconds` (by default six retries within
-300 seconds). An `unknown` failure is not retried unless
-`retry_unclassified=True`, and a streamed attempt that has already forwarded a
-chunk is never retried. Each retry is reported as a
-[`ModelRetryEvent`](../events.md#other-events-on-the-stream).
-[`ModelRetryHook`](../retry.md) is a different layer: it re-calls the model,
-which is the whole chain, when a reply comes back empty. A provider SDK's own
-retries (`max_retries` on `OpenAIConfig` and `AnthropicConfig`) run inside one
-tier, before the chain sees the error.
+Retries wrap the chain, not a tier. The agent loop wraps every model call in `call_with_retry`, governed by [`AgentConfig.model_retry`](../../api/agent.md#agentconfig), a `ModelRetryConfig` that is on by default.
+
+When the error that leaves the chain classifies as `rate_limit`, `overloaded`, `server_error` or `timeout`, the loop waits (the provider's `retry-after` when it sends one, otherwise an exponential backoff with full jitter) and calls the chain again from the top, up to `max_retries` times within `total_budget_seconds` (by default six retries within 300 seconds).
+
+An `unknown` failure is not retried unless `retry_unclassified=True`, and a streamed attempt that has already forwarded a chunk is never retried. Each retry is reported as a [`ModelRetryEvent`](../events.md#other-events-on-the-stream).
+
+[`ModelRetryHook`](../retry.md) is a different layer: it re-calls the model, which is the whole chain, when a reply comes back empty. A provider SDK's own retries (`max_retries` on `OpenAIConfig` and `AnthropicConfig`) run inside one tier, before the chain sees the error.
 
 ## Rotating credentials
 

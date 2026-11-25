@@ -89,37 +89,19 @@ result = await orchestrator.execute(
 )
 ```
 
-`create_orchestrator` registers the specialists but does not hand its
-`model` to them, and a `Specialist` with no model returns an error
-result instead of running. `.with_model(model)` sets the coordinator's
-model and copies it into every registered specialist, replacing
-any model a specialist already carried. To give specialists different
-models, set `model=` on each `Specialist` and pass the coordinator's own
-to `create_orchestrator(model=...)` instead. The coordinator's
-`system_prompt` is its instructions for routing, correlating and
-summarizing.
-`execute()` is async — `await` it (or wrap in `asyncio.run`). It returns
-an `OrchestratorResult`: `summary` is the coordinator's final answer,
-and `specialist_results` holds each picked specialist's
-`SpecialistResult`, keyed by specialist id. The same shape runs an
-incident commander with triage, forensics, and containment specialists.
-Routing happens once and can pick any registered specialist, so to hold
-containment until the other two report, register only triage and
-forensics on the first orchestrator, then run a second one holding
-containment with their findings in its task.
+`create_orchestrator` registers the specialists but does not hand its `model` to them, and a `Specialist` with no model returns an error result instead of running. `.with_model(model)` sets the coordinator's model and copies it into every registered specialist, replacing any model a specialist already carried.
+
+To give specialists different models, set `model=` on each `Specialist` and pass the coordinator's own to `create_orchestrator(model=...)` instead. The coordinator's `system_prompt` is its instructions for routing, correlating and summarizing.
+
+`execute()` is async — `await` it (or wrap in `asyncio.run`). It returns an `OrchestratorResult`: `summary` is the coordinator's final answer, and `specialist_results` holds each picked specialist's `SpecialistResult`, keyed by specialist id.
+
+The same shape runs an incident commander with triage, forensics, and containment specialists. Routing happens once and can pick any registered specialist, so to hold containment until the other two report, register only triage and forensics on the first orchestrator, then run a second one holding containment with their findings in its task.
 
 ## What runs in parallel
 
-Every specialist the router picks runs **concurrently**, at most
-`max_parallel_specialists` at a time. So when the router gives research
-"pull the release notes for deploy-77" and data "pull last week's funnel
-metrics", both specialists run at the same time. Neither sees the
-other's work: each gets its own subtask, plus the original task when
-the two differ. Their results come back to the coordinator together,
-and its model correlates them and then summarizes. A specialist whose
-reply comes back empty is retried once (an error result counts as
-empty), and one that still fails returns an error result while the rest
-carry on.
+Every specialist the router picks runs **concurrently**, at most `max_parallel_specialists` at a time. So when the router gives research "pull the release notes for deploy-77" and data "pull last week's funnel metrics", both specialists run at the same time. Neither sees the other's work: each gets its own subtask, plus the original task when the two differ.
+
+Their results come back to the coordinator together, and its model correlates them and then summarizes. A specialist whose reply comes back empty is retried once (an error result counts as empty), and one that still fails returns an error result while the rest carry on.
 
 ## Confidence thresholds
 

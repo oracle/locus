@@ -129,19 +129,17 @@ locus eval trend --store "oracle://?dsn=mydb_low&table=LOCUS_EVAL_REPORTS" --sui
 locus eval trend --store "oci://<namespace>/<bucket>/locus/eval/?profile=CI" --suite warden --markdown
 ```
 
-A store is a directory or `file://` path, a SQLite database file
-(`sqlite://` followed by the file's path), an Oracle AI Database table
-(`oracle://`, reading `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
-`ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the
-environment when the spec does not name them), an OCI Object Storage bucket (`oci://`) or any
-S3-compatible bucket (`s3://`); `LOCUS_EVAL_STORE` supplies the spec when
-`--store` is not given. `--suite` defaults to the cases file's stem. `trend`
-prints one line per report, oldest first, with the pass count, the average
-and how each moved against the one before it; a report whose fingerprint
-differs from the previous one is marked `suite changed` rather than read as
-a regression. The command exits 1 when the newest report is worse than the
-one before it, so a nightly job can fail on a slide the per-build gate
-never sees.
+A store is one of:
+
+- a directory or `file://` path
+- a SQLite database file (`sqlite://` followed by the file's path)
+- an Oracle AI Database table (`oracle://`, reading `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the environment when the spec does not name them)
+- an OCI Object Storage bucket (`oci://`)
+- any S3-compatible bucket (`s3://`)
+
+`LOCUS_EVAL_STORE` supplies the spec when `--store` is not given. `--suite` defaults to the cases file's stem.
+
+`trend` prints one line per report, oldest first, with the pass count, the average and how each moved against the one before it; a report whose fingerprint differs from the previous one is marked `suite changed` rather than read as a regression. The command exits 1 when the newest report is worse than the one before it, so a nightly job can fail on a slide the per-build gate never sees.
 
 ## 6. Grade the path and the conversation, not only the reply
 

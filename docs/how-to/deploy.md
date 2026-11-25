@@ -104,32 +104,23 @@ You get out of the box:
 
 ## Wiring a web UI
 
-A browser front end talks to the server in one of three ways, all behind
-the same bearer key. A plain page starts a turn with
-`POST /threads/{id}/runs` and follows `GET /runs/{id}/events`, sending the
-last `id:` it saw as `Last-Event-ID` when the connection drops;
-[`examples/server_ui/index.html`](https://github.com/oracle/locus/tree/main/examples/server_ui)
-is that page, with no build step. A UI built on AG-UI components posts its
-`RunAgentInput` to `/ag-ui`
-([`examples/server_ui/ag-ui.html`](https://github.com/oracle/locus/tree/main/examples/server_ui)
-is a minimal client); one built on the Vercel AI SDK points its chat
-transport at `/vercel-ai`. Either can also read any run as
-`GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, and cancel or resume
-through the run resources. The browser cannot set the `Authorization`
-header on an `EventSource` or a WebSocket: use `fetch()` for SSE, as the
-example page does, and `?token=` on the `/runs/live` URL, or terminate
-authentication at a proxy that adds the header.
+A browser front end talks to the server in one of three ways, all behind the same bearer key:
 
-Three deployment details follow from this. Serve the page from the same
-origin as the API, or add `CORSMiddleware` to `server.app` for the page's
-origin. Let the WebSocket upgrade through the ingress (`/runs/live`), and
-turn response buffering off for the SSE routes as the Kubernetes section
-below says. And because the run registry is per process, route a client
-to the same worker for the life of a run (sticky sessions, or one worker
-per replica); thread *state* is shared through the checkpointer either
-way. The bounds of the registry — events kept per run, finished runs
-kept, their TTL — are described under
-[Threads and runs](../concepts/server.md#threads-and-runs).
+- A plain page starts a turn with `POST /threads/{id}/runs` and follows `GET /runs/{id}/events`, sending the last `id:` it saw as `Last-Event-ID` when the connection drops; [`examples/server_ui/index.html`](https://github.com/oracle/locus/tree/main/examples/server_ui) is that page, with no build step.
+- A UI built on AG-UI components posts its `RunAgentInput` to `/ag-ui` ([`examples/server_ui/ag-ui.html`](https://github.com/oracle/locus/tree/main/examples/server_ui) is a minimal client).
+- One built on the Vercel AI SDK points its chat transport at `/vercel-ai`.
+
+Either of the last two can also read any run as `GET /runs/{id}/events?protocol=ag-ui|vercel-ai`, and cancel or resume through the run resources.
+
+The browser cannot set the `Authorization` header on an `EventSource` or a WebSocket: use `fetch()` for SSE, as the example page does, and `?token=` on the `/runs/live` URL, or terminate authentication at a proxy that adds the header.
+
+Three deployment details follow from this:
+
+- Serve the page from the same origin as the API, or add `CORSMiddleware` to `server.app` for the page's origin.
+- Let the WebSocket upgrade through the ingress (`/runs/live`), and turn response buffering off for the SSE routes as the Kubernetes section below says.
+- Because the run registry is per process, route a client to the same worker for the life of a run (sticky sessions, or one worker per replica); thread *state* is shared through the checkpointer either way.
+
+The bounds of the registry — events kept per run, finished runs kept, their TTL — are described under [Threads and runs](../concepts/server.md#threads-and-runs).
 
 Provider credentials are read from the environment, or supplied by the
 platform as a principal. Inject secrets at runtime; never bake one into the
@@ -146,15 +137,9 @@ authentication off.
 
 ## Container — the universal target
 
-The locus-sdk repo ships a multi-stage [`Dockerfile`](https://github.com/oracle/locus/blob/main/Dockerfile)
-(non-root user, `HEALTHCHECK` on `/health`). It is the library base image:
-built from the locus-sdk repo root, it installs `locus-sdk` with the
-`openai`, `server`, and `checkpoints` extras but copies no application code,
-and its `CMD` names a placeholder `app:server.app` for you to replace. The
-`checkpoints` extra also pulls in the OCI SDK, so the image as built serves
-the OCI, OpenAI, and Self-hosted tabs; for the Anthropic tab, add `anthropic`
-to the extras on the `pip install` line before building. Build it once, then
-derive your own image that adds `server.py`:
+The locus-sdk repo ships a multi-stage [`Dockerfile`](https://github.com/oracle/locus/blob/main/Dockerfile) (non-root user, `HEALTHCHECK` on `/health`). It is the library base image: built from the locus-sdk repo root, it installs `locus-sdk` with the `openai`, `server`, and `checkpoints` extras but copies no application code, and its `CMD` names a placeholder `app:server.app` for you to replace.
+
+The `checkpoints` extra also pulls in the OCI SDK, so the image as built serves the OCI, OpenAI, and Self-hosted tabs; for the Anthropic tab, add `anthropic` to the extras on the `pip install` line before building. Build it once, then derive your own image that adds `server.py`:
 
 ```bash
 # In a locus-sdk checkout, from the repo root, at the tested release

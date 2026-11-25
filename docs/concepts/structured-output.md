@@ -73,17 +73,11 @@ for t in picks.tickets:
 
 ## Repair on validation failure
 
-If the model's first answer fails validation, the SDK re-prompts up to
-`output_schema_retries` times (default 2) with the Pydantic
-`ValidationError` details inlined so the model can fix the response. The
-repair call offers no tools and carries the full response format,
-`{"type": "json_schema", "json_schema": {"name": …, "schema": …,
-"strict": True}}` (`strict` follows `output_schema_strict`), so a
-provider that constrains decoding does so here even for a tool-using
-agent; a model whose `complete()` does not accept the keyword is called
-again without it. The repair exchange is metered — its token usage is
-counted in the run's totals — but its messages are never written to the
-returned conversation state.
+If the model's first answer fails validation, the SDK re-prompts up to `output_schema_retries` times (default 2) with the Pydantic `ValidationError` details inlined so the model can fix the response.
+
+The repair call offers no tools and carries the full response format, `{"type": "json_schema", "json_schema": {"name": …, "schema": …, "strict": True}}` (`strict` follows `output_schema_strict`), so a provider that constrains decoding does so here even for a tool-using agent; a model whose `complete()` does not accept the keyword is called again without it.
+
+The repair exchange is metered — its token usage is counted in the run's totals — but its messages are never written to the returned conversation state.
 
 ```python
 agent = Agent(
@@ -165,17 +159,11 @@ unbalanced braces / brackets / strings, runs the result through
 By default identical consecutive partials are deduplicated; pass
 `emit_unchanged=True` to surface every parseable chunk.
 
-A partial is only yielded when **all required fields** are present —
-optional fields may still be `None` or absent. When the run ends with a
-`TerminateEvent`, `stream.final` is parsed from the run's final message
-(or from the token buffer if that message is empty), even if no partial
-ever validated. If that parse fails, it falls back to the last partial,
-and it is `None` when neither validated. A run that pauses for input or
-approval — an `InterruptEvent` from `ask_user`, or from a call held
-under `on_refusal="interrupt"` — ends without a `TerminateEvent`, so
-`stream.final` stays `None` even if partials arrived. A run that raises
-passes the exception out of the `async for` loop, and `stream.final`
-stays `None`.
+A partial is only yielded when **all required fields** are present — optional fields may still be `None` or absent.
+
+When the run ends with a `TerminateEvent`, `stream.final` is parsed from the run's final message (or from the token buffer if that message is empty), even if no partial ever validated. If that parse fails, it falls back to the last partial, and it is `None` when neither validated.
+
+A run that pauses for input or approval — an `InterruptEvent` from `ask_user`, or from a call held under `on_refusal="interrupt"` — ends without a `TerminateEvent`, so `stream.final` stays `None` even if partials arrived. A run that raises passes the exception out of the `async for` loop, and `stream.final` stays `None`.
 
 ## Composing with tools
 

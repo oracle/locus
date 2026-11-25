@@ -7,20 +7,11 @@ The SDK's retry posture is:
 
 ## The default behaviour
 
-Every model call the loop makes is wrapped in a retry governed by
-[`AgentConfig.model_retry`](../api/agent.md#agentconfig), a
-`ModelRetryConfig` that is on by default. When a call fails with a rate
-limit (429), an overload or server error (5xx), a dropped connection or
-a timeout — as the failover classifier
-(`locus.models.failover.classify`) names them — the loop waits and
-re-issues the same request. The wait is what the provider's
-`retry-after` / `retry-after-ms` asks for when it sends one; otherwise
-an exponential backoff with full jitter: a ceiling of 1 s that doubles
-each retry up to 60 s, with the delay drawn uniformly below the ceiling
-so parallel agents sharing one rate limit do not retry in lockstep. By
-default the loop makes up to 6 retries within a 300 s budget counted
-from the first attempt; a retry whose wait would end past the budget is
-not started.
+Every model call the loop makes is wrapped in a retry governed by [`AgentConfig.model_retry`](../api/agent.md#agentconfig), a `ModelRetryConfig` that is on by default. When a call fails with a rate limit (429), an overload or server error (5xx), a dropped connection or a timeout — as the failover classifier (`locus.models.failover.classify`) names them — the loop waits and re-issues the same request.
+
+The wait is what the provider's `retry-after` / `retry-after-ms` asks for when it sends one; otherwise an exponential backoff with full jitter: a ceiling of 1 s that doubles each retry up to 60 s, with the delay drawn uniformly below the ceiling so parallel agents sharing one rate limit do not retry in lockstep.
+
+By default the loop makes up to 6 retries within a 300 s budget counted from the first attempt; a retry whose wait would end past the budget is not started.
 
 Failures a retry cannot fix fail at once: a context-length overflow, a
 malformed request, a bad key, a billing failure, an unknown model. An

@@ -98,17 +98,9 @@ The accepted values depend on the model and the server validates them; a
 model that does not reason rejects the field. Reasoning summaries the
 endpoint returns surface as `ModelResponse.reasoning`.
 
-**Reasoning across tool calls without server state.** With `store=False`
-(or after the Zero Data Retention switch) nothing is kept server-side, so
-when a reasoning control is set the request also asks for
-`include=["reasoning.encrypted_content"]`. The reasoning items that come
-back stay on the assistant message (`metadata["oci_responses_items"]`,
-together with the turn's `function_call` items) and the next request
-replays them verbatim ahead of the tool result, so a tool-calling turn
-keeps the reasoning that led to the call. Whether the endpoint returns
-reasoning items depends on the model; when it returns none, the turn is
-reconstructed from the message as before. Streamed turns are
-reconstructed too.
+**Reasoning across tool calls without server state.** With `store=False` (or after the Zero Data Retention switch) nothing is kept server-side, so when a reasoning control is set the request also asks for `include=["reasoning.encrypted_content"]`. The reasoning items that come back stay on the assistant message (`metadata["oci_responses_items"]`, together with the turn's `function_call` items) and the next request replays them verbatim ahead of the tool result, so a tool-calling turn keeps the reasoning that led to the call.
+
+Whether the endpoint returns reasoning items depends on the model; when it returns none, the turn is reconstructed from the message as before. Streamed turns are reconstructed too.
 
 ## Native compaction
 
@@ -139,20 +131,11 @@ agent = Agent(
 )
 ```
 
-Old tool output is still cleared first. When that is not enough, the
-system prompt and the task message stay verbatim and the rest of the
-history goes to the endpoint; what comes back replaces it in
-`state.messages` and in the checkpoint, and the model replays the
-compaction item on every later request. The run yields a
-`CompactionEvent` with `stage="native"`; the compaction call's tokens
-count against the run's budgets. If the endpoint call fails the
-client-side summary takes over for that compaction. With `store=True`
-the server holds the thread and no client-side compaction runs. The
-stage earns its keep on assistant- and tool-heavy histories: user
-messages come back as they went in, and the compaction item is replayed
-on every later request (its size is counted in `tokens_after`), so see
-[conversation management](conversation-management.md#compaction-keep-long-threads-in-budget)
-for when a client-side summary is the better fit.
+Old tool output is still cleared first. When that is not enough, the system prompt and the task message stay verbatim and the rest of the history goes to the endpoint; what comes back replaces it in `state.messages` and in the checkpoint, and the model replays the compaction item on every later request.
+
+The run yields a `CompactionEvent` with `stage="native"`; the compaction call's tokens count against the run's budgets. If the endpoint call fails the client-side summary takes over for that compaction. With `store=True` the server holds the thread and no client-side compaction runs.
+
+The stage earns its keep on assistant- and tool-heavy histories: user messages come back as they went in, and the compaction item is replayed on every later request (its size is counted in `tokens_after`), so see [conversation management](conversation-management.md#compaction-keep-long-threads-in-budget) for when a client-side summary is the better fit.
 
 ## What changes vs `OCIChatCompletionsModel`
 

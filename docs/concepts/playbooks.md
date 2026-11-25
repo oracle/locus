@@ -141,16 +141,9 @@ agent = Agent(
 result = agent.run_sync("Customer on ord-4821 reports a duplicate charge — refund if eligible.")
 ```
 
-The hook validates each tool call against the current step's
-`expected_tools` and records the executions. It does not add the plan
-to the prompt: a step's `hints` reach the model only when a call is
-rejected (with the hook's default `block_violations=True`), as part of
-the `PlaybookEnforcer blocked: … | Hints: …` tool result the model then
-has to recover from; `description` is never sent. If you want the
-model steered up front, put the procedure in `system_prompt=` as well.
-The verify → check-eligibility → refund order is enforced: an
-`issue_refund` call during the `verify_order` step is rejected, so no
-refund fires before `check_refund_policy` has run.
+The hook validates each tool call against the current step's `expected_tools` and records the executions. It does not add the plan to the prompt: a step's `hints` reach the model only when a call is rejected (with the hook's default `block_violations=True`), as part of the `PlaybookEnforcer blocked: … | Hints: …` tool result the model then has to recover from; `description` is never sent. If you want the model steered up front, put the procedure in `system_prompt=` as well.
+
+The verify → check-eligibility → refund order is enforced: an `issue_refund` call during the `verify_order` step is rejected, so no refund fires before `check_refund_policy` has run.
 
 ## Strict vs lenient enforcement
 
@@ -278,17 +271,11 @@ for violation in enforcer_hook.enforcer.violations:
 print(f"probe coverage (steps reached): {enforcer_hook.enforcer.adherence_score():.2f}")
 ```
 
-If the agent's `lookup_order` arguments never mention `include_charges`,
-the `verify_order` step still closes — probes are recorded, they don't
-block — and the violation list carries an `evidence_incomplete` entry
-naming `charge_history`. `adherence_score()` averages probe coverage
-over the steps the run reached, not the whole playbook: a run that
-closes `verify_order` with its probe matched and then stops scores
-1.00, so read it alongside
-`enforcer_hook.enforcer.plan.unresolved_required_steps()`. A substring match
-shows the string was asked for, not that the evidence was examined, so
-a low score is worth investigating and a high one proves little. The
-violation list is the thing to show a reviewer.
+If the agent's `lookup_order` arguments never mention `include_charges`, the `verify_order` step still closes — probes are recorded, they don't block — and the violation list carries an `evidence_incomplete` entry naming `charge_history`.
+
+`adherence_score()` averages probe coverage over the steps the run reached, not the whole playbook: a run that closes `verify_order` with its probe matched and then stops scores 1.00, so read it alongside `enforcer_hook.enforcer.plan.unresolved_required_steps()`.
+
+A substring match shows the string was asked for, not that the evidence was examined, so a low score is worth investigating and a high one proves little. The violation list is the thing to show a reviewer.
 
 ## Common gotchas
 

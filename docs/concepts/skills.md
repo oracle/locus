@@ -1,15 +1,8 @@
 # Skills
 
-A skill is a reusable capability bundle the agent loads only when it
-needs it. You give the agent fifty skills; on every request it sees a
-catalog of fifty names and one-line descriptions, and it pays the
-context cost of only the one it activates. When the model decides a
-skill is relevant to the current task, the full instructions for *that
-one skill* enter the conversation. This is the
-[AgentSkills.io](https://agentskills.io) spec — **progressive
-disclosure** — and it is how you compose **broad agents** (one model,
-many domain skills) without exhausting the context budget on
-capabilities the run will not use.
+A skill is a reusable capability bundle the agent loads only when it needs it. You give the agent fifty skills; on every request it sees a catalog of fifty names and one-line descriptions, and it pays the context cost of only the one it activates. When the model decides a skill is relevant to the current task, the full instructions for *that one skill* enter the conversation.
+
+This is the [AgentSkills.io](https://agentskills.io) spec — **progressive disclosure** — and it is how you compose **broad agents** (one model, many domain skills) without exhausting the context budget on capabilities the run will not use.
 
 Each skill is a folder with a `SKILL.md`. Point your agent at the
 parent directory and the SDK handles the disclosure tiers. The drawing
@@ -117,28 +110,16 @@ When you need a tool to be genuinely unreachable, don't register it on
 the agent (or gate it with a [hook](hooks.md)). A skill with
 `allowed_tools=None` adds no such line.
 
-The one place the list *is* enforced is inside a
-[playbook](playbooks.md) step that names the skill. Give the agent the
-skill as a `Skill` object (`skills=[refund_triage]`, or the list
-`Skill.from_directory` returns; a directory path in `skills=` does not
-work here — a string path fails at construction once `playbook=` is
-set, and a `Path` leaves `uses` resolving to nothing) and a playbook
-(`playbook=...`) whose step lists it in `uses` — `PlaybookStep(id="triage", description="Triage the
-refund request", uses=["refund-triage"])` — and while that step is
-current, any call outside the union of its skills' `allowed_tools` is
-blocked as a `tool_outside_skill` violation, as long as the playbook
-keeps `allow_extra_tools=False` and the enforcer `block_violations=True`
-(both defaults). That includes the `skills` activation tool itself
-unless you list it. The step also inherits the skill's
-`required_probes` (a list of `RequiredProbe` from
-`locus.playbooks.models`); each probe's `match` is sought,
-case-insensitively, in the tool name and serialized arguments of the
-step's calls, not in their results. `Skill` also accepts
-`min_tool_calls` / `max_tool_calls`, but in {{ locus_sdk_version }} a
-step that uses the skill does not apply them — declare those bounds on
-the step itself (see the
-[step fields](playbooks.md#1-build-a-playbook-in-python)). Outside such
-a step, `allowed_tools` constrains nothing.
+The one place the list *is* enforced is inside a [playbook](playbooks.md) step that names the skill. Give the agent:
+
+- the skill as a `Skill` object (`skills=[refund_triage]`, or the list `Skill.from_directory` returns; a directory path in `skills=` does not work here — a string path fails at construction once `playbook=` is set, and a `Path` leaves `uses` resolving to nothing)
+- a playbook (`playbook=...`) whose step lists it in `uses` — `PlaybookStep(id="triage", description="Triage the refund request", uses=["refund-triage"])`
+
+While that step is current, any call outside the union of its skills' `allowed_tools` is blocked as a `tool_outside_skill` violation, as long as the playbook keeps `allow_extra_tools=False` and the enforcer `block_violations=True` (both defaults). That includes the `skills` activation tool itself unless you list it.
+
+The step also inherits the skill's `required_probes` (a list of `RequiredProbe` from `locus.playbooks.models`); each probe's `match` is sought, case-insensitively, in the tool name and serialized arguments of the step's calls, not in their results.
+
+`Skill` also accepts `min_tool_calls` / `max_tool_calls`, but in {{ locus_sdk_version }} a step that uses the skill does not apply them — declare those bounds on the step itself (see the [step fields](playbooks.md#1-build-a-playbook-in-python)). Outside such a step, `allowed_tools` constrains nothing.
 
 ### Filesystem — drop a `SKILL.md`
 

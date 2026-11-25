@@ -105,15 +105,9 @@ concierge/
 └── helm/locus-agent/          # the chart the oke root installs; usable with helm alone
 ```
 
-`terraform/` and `helm/` are refreshed by every `init`; `locus-deploy.yaml`,
-`app/server.py` and `app/requirements.txt` are yours and are only rewritten
-with `--force`. A `Dockerfile`, `Dockerfile.functions` or `.dockerignore` that
-already exists with other content (an existing project's, or one you edited)
-stops `init` until you pass `--force`, and an existing `.gitignore` only gains
-the missing lines under a `# locus deploy` marker. Commit the directory: the
-state files and the generated `locus.auto.tfvars.json` are ignored by that
-`.gitignore`, because they name your tenancy, and `.dockerignore` keeps them,
-the `.terraform/` provider caches and every `*.tfvars` out of the image.
+`terraform/` and `helm/` are refreshed by every `init`; `locus-deploy.yaml`, `app/server.py` and `app/requirements.txt` are yours and are only rewritten with `--force`. A `Dockerfile`, `Dockerfile.functions` or `.dockerignore` that already exists with other content (an existing project's, or one you edited) stops `init` until you pass `--force`, and an existing `.gitignore` only gains the missing lines under a `# locus deploy` marker.
+
+Commit the directory: the state files and the generated `locus.auto.tfvars.json` are ignored by that `.gitignore`, because they name your tenancy, and `.dockerignore` keeps them, the `.terraform/` provider caches and every `*.tfvars` out of the image.
 
 ### `locus-deploy.yaml`
 
@@ -197,19 +191,11 @@ Allow any-user to use generative-ai-family in compartment <name> where all {
   request.principal.cluster_id = '<cluster-id>' }
 ```
 
-Add `read secret-bundles` and the Object Storage statements the same way.
-`<release>` is the Helm release name, the deployment's `name`; the `service`
-and `service_account` outputs of the OKE root print the exact value (a release
-name that already contains `locus-agent` is used as is, so the default
-`locus-agent` release creates a service account named `locus-agent`). The OKE
-root's `workload_identity` variable switches between the two models. With
-workload identity the chart sets `LOCUS_OCI_AUTH_TYPE` and `OCI_AUTH_TYPE` to
-`oke_workload_identity` next to `OCI_RESOURCE_PRINCIPAL_VERSION=2.2` and the
-region: a pod holds no resource principal session token, so the SDK exchanges
-the pod's Kubernetes service-account token through the OKE workload-identity
-signer. The SDK's `resource_principal` auth type detects that token on its own
-and does the same, so an agent written for Functions runs unchanged on OKE;
-`oke_workload_identity` names the path outright.
+Add `read secret-bundles` and the Object Storage statements the same way. `<release>` is the Helm release name, the deployment's `name`; the `service` and `service_account` outputs of the OKE root print the exact value (a release name that already contains `locus-agent` is used as is, so the default `locus-agent` release creates a service account named `locus-agent`).
+
+The OKE root's `workload_identity` variable switches between the two models. With workload identity the chart sets `LOCUS_OCI_AUTH_TYPE` and `OCI_AUTH_TYPE` to `oke_workload_identity` next to `OCI_RESOURCE_PRINCIPAL_VERSION=2.2` and the region: a pod holds no resource principal session token, so the SDK exchanges the pod's Kubernetes service-account token through the OKE workload-identity signer.
+
+The SDK's `resource_principal` auth type detects that token on its own and does the same, so an agent written for Functions runs unchanged on OKE; `oke_workload_identity` names the path outright.
 
 ## Secrets
 
@@ -312,14 +298,9 @@ Install the `telemetry` extra in `app/requirements.txt`.
 
 ### Container Instances
 
-The root creates one container instance in a VCN. With `create_network: true`
-it also creates the VCN: a public subnet, an internet gateway and a security
-list that admits the agent port from `ingress_cidr`; the instance pulls its
-image and reaches OCI services over its public IP. Narrow `ingress_cidr` to
-your callers. For an existing network, set `create_network: false` and
-`subnet_id`; a private subnet needs a NAT gateway or a service gateway for
-OCIR and the OCI APIs, and `assign_public_ip: false` with an OCI load balancer
-or an API Gateway in front.
+The root creates one container instance in a VCN. With `create_network: true` it also creates the VCN: a public subnet, an internet gateway and a security list that admits the agent port from `ingress_cidr`; the instance pulls its image and reaches OCI services over its public IP. Narrow `ingress_cidr` to your callers.
+
+For an existing network, set `create_network: false` and `subnet_id`; a private subnet needs a NAT gateway or a service gateway for OCIR and the OCI APIs, and `assign_public_ip: false` with an OCI load balancer or an API Gateway in front.
 
 The health check is `GET /health` every 30 s; the service restarts the
 container after three failures. The instance has no autoscaler: one instance

@@ -91,14 +91,9 @@ setup.
 
 ## Build it with Codex
 
-[OpenAI Codex](https://developers.openai.com/codex) builds on the SDK. The
-repository ships a Codex skill that teaches it the SDK: the `Agent` and its
-tools, the admission gate, the multi-agent shapes, memory and RAG on Oracle
-Database 26ai, the coding harness, the model providers, offline tests with
-model doubles. `locus codex` puts the skill where Codex looks and starts
-Codex with the sandbox settings it needs. Codex itself can run on OCI
-Generative AI through a loopback gateway in the repository, so neither Codex
-nor the agent it builds needs an account outside Oracle Cloud.
+[OpenAI Codex](https://developers.openai.com/codex) builds on the SDK. The repository ships a Codex skill that teaches it the SDK: the `Agent` and its tools, the admission gate, the multi-agent shapes, memory and RAG on Oracle Database 26ai, the coding harness, the model providers, offline tests with model doubles.
+
+`locus codex` puts the skill where Codex looks and starts Codex with the sandbox settings it needs. Codex itself can run on OCI Generative AI through a loopback gateway in the repository, so neither Codex nor the agent it builds needs an account outside Oracle Cloud.
 
 ```bash
 pip install "locus-sdk[oci]"

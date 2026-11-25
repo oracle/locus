@@ -270,15 +270,9 @@ call 1  1.730s  id=chatcmpl-…94c33  x-litellm-response-cost: 0.000017
 call 2  0.050s  id=chatcmpl-…94c33  x-litellm-response-cost: 0.0  x-litellm-cache-key: f24b15…
 ```
 
-The saving on identical prompts is the whole upstream cost of the repeat.
-Agent loops repeat less than it seems — each turn carries new tool results
-— so the cache pays off on the stable parts of a workload: classification
-prompts, retrieval rewrites, evaluation rubrics, anything many users ask
-the same way. A cached answer is the earlier sample, so a request that
-wants a fresh one opts out with `"cache": {"no-cache": true}` in the
-body. The gateway does not start with `cache: true` and no reachable
-Redis, which is why the cache lives in its own config file rather than
-behind a switch in `config.yaml`.
+The saving on identical prompts is the whole upstream cost of the repeat. Agent loops repeat less than it seems — each turn carries new tool results — so the cache pays off on the stable parts of a workload: classification prompts, retrieval rewrites, evaluation rubrics, anything many users ask the same way.
+
+A cached answer is the earlier sample, so a request that wants a fresh one opts out with `"cache": {"no-cache": true}` in the body. The gateway does not start with `cache: true` and no reachable Redis, which is why the cache lives in its own config file rather than behind a switch in `config.yaml`.
 
 ## Guardrails
 

@@ -187,41 +187,25 @@ async for event in agent.resume("approved", thread_id="t1", perform_dangling=Tru
     ...
 ```
 
-An approval names one call. Its id is derived from a digest of the principal,
-the tool, the arguments, `policy.version` when set, and any `approval_context`,
-so a call with different arguments waits for its own decision. An approved call
-is weighed against the policy again when it is redeemed, so a `deny` such as a
-spend limit still refuses it, and it runs at most once as long as the store's
-writes do not race (see the `FileApprovals` limit below): the approval is
-consumed immediately before the side effect, so a repeated call holds again
-instead of riding an old yes. A denied call returns a refusal. A policy `deny` never pauses. `on_refusal="interrupt"`
-needs an `ApprovalStore`, not a bare `ApprovalBridge`, and raises `TypeError`
-without one.
+An approval names one call. Its id is derived from a digest of the principal, the tool, the arguments, `policy.version` when set, and any `approval_context`, so a call with different arguments waits for its own decision.
 
-`InMemoryApprovals` lives in one process and is gone on restart; it is for
-tests and demos. `FileApprovals` keeps every record in one JSON file, re-read on
-every call and written atomically, so a decision written by another process is
-seen by the next call. Writes are serialised only through one `FileApprovals`
-object in one process, and the agent's own submits and consumes are writes too.
-A decision saved from another process, or through another `FileApprovals`
-object, at the same moment can overwrite one of them. In the worst case a
-consumed approval goes back to `approved` and can be redeemed again. Where that
-matters, use one of the database-backed stores.
+An approved call is weighed against the policy again when it is redeemed, so a `deny` such as a spend limit still refuses it, and it runs at most once as long as the store's writes do not race (see the `FileApprovals` limit below): the approval is consumed immediately before the side effect, so a repeated call holds again instead of riding an old yes.
 
-**Database-backed stores.** `PostgresApprovals`, `RedisApprovals` and
-`OracleApprovals` keep one record per held call and make every submit,
-decision and consumption under the database's own lock (`SELECT ... FOR
-UPDATE` in PostgreSQL and Oracle, a lock key in Redis), so replicas that share
-the store never both redeem one approval. They follow the connection
-conventions of the matching checkpointer backend: a libpq DSN or host / port /
-database / user / password, a `redis://` URL and key prefix, a TNS alias or
-host / port / service name with an optional `config_dir` (the `tnsnames.ora`
-directory, for a TLS-only database) or wallet (mutual TLS). The table is created on
-first use only when it is missing, so a role without `CREATE` works against a
-table a migration made. Each store owns one event loop on a background thread,
-where its pool lives; the `ApprovalStore` methods block on it, and `asubmit`,
-`aget`, `adecide`, `aconsume`, `apending` await it from your own loop. Call
-`close()` (or `await aclose()`) when the application shuts down.
+A denied call returns a refusal. A policy `deny` never pauses. `on_refusal="interrupt"` needs an `ApprovalStore`, not a bare `ApprovalBridge`, and raises `TypeError` without one.
+
+`InMemoryApprovals` lives in one process and is gone on restart; it is for tests and demos. `FileApprovals` keeps every record in one JSON file, re-read on every call and written atomically, so a decision written by another process is seen by the next call.
+
+Writes are serialised only through one `FileApprovals` object in one process, and the agent's own submits and consumes are writes too. A decision saved from another process, or through another `FileApprovals` object, at the same moment can overwrite one of them. In the worst case a consumed approval goes back to `approved` and can be redeemed again. Where that matters, use one of the database-backed stores.
+
+**Database-backed stores.** `PostgresApprovals`, `RedisApprovals` and `OracleApprovals` keep one record per held call and make every submit, decision and consumption under the database's own lock (`SELECT ... FOR UPDATE` in PostgreSQL and Oracle, a lock key in Redis), so replicas that share the store never both redeem one approval.
+
+They follow the connection conventions of the matching checkpointer backend:
+
+- PostgreSQL: a libpq DSN or host / port / database / user / password
+- Redis: a `redis://` URL and key prefix
+- Oracle: a TNS alias or host / port / service name with an optional `config_dir` (the `tnsnames.ora` directory, for a TLS-only database) or wallet (mutual TLS)
+
+The table is created on first use only when it is missing, so a role without `CREATE` works against a table a migration made. Each store owns one event loop on a background thread, where its pool lives; the `ApprovalStore` methods block on it, and `asubmit`, `aget`, `adecide`, `aconsume`, `apending` await it from your own loop. Call `close()` (or `await aclose()`) when the application shuts down.
 
 ```python
 from locus.control import OracleApprovals, PostgresApprovals, RedisApprovals
@@ -294,14 +278,9 @@ authority = ApprovalAuthority(
 store = FileApprovals("approvals.json", authority=authority)
 ```
 
-Every rule that matches the held action's labels must reach its quorum of
-distinct authorised approvers before the call is approved; one authorised
-denial ends it. The principal that requested the action cannot approve it,
-directly or through a delegation it granted, unless every matching rule sets
-`allow_self_approval`. A `Delegation` lends an approver's authority to someone
-else until a deadline. A decision by someone without authority raises
-`ApprovalAuthorityError` and is kept on the record as a rejection. An action no
-rule covers cannot be approved by anyone: the authority fails closed.
+Every rule that matches the held action's labels must reach its quorum of distinct authorised approvers before the call is approved; one authorised denial ends it. The principal that requested the action cannot approve it, directly or through a delegation it granted, unless every matching rule sets `allow_self_approval`.
+
+A `Delegation` lends an approver's authority to someone else until a deadline. A decision by someone without authority raises `ApprovalAuthorityError` and is kept on the record as a rejection. An action no rule covers cannot be approved by anyone: the authority fails closed.
 
 ::: locus.control.approvals.ApprovalStore
 ::: locus.control.approvals.InMemoryApprovals
@@ -342,18 +321,11 @@ refund = gate_tool(
 )
 ```
 
-A scope is any string: a thread, a customer, a tenant, a month. Spend is
-recorded only after the action has run, so a refused or failed action costs
-nothing. The check and the record are not one transaction. Two calls against
-the same scope that overlap can each pass the check before either records, so
-the cap can be exceeded. That includes two processes, and also two tool calls
-the agent runs together in one turn (the default is
-`tool_execution="concurrent"`). `SpendLedger` reads and records in separate
-calls, before and after the action, so a ledger cannot make the check atomic by
-itself. Where the cap must hold, run the agent that has the spending tools with
-`tool_execution="sequential"` and keep one writer per scope.
-`InMemorySpendLedger` is the in-process version, for tests
-and demos. `admit()` takes `ledger=` and a string `spend_scope=` directly.
+A scope is any string: a thread, a customer, a tenant, a month. Spend is recorded only after the action has run, so a refused or failed action costs nothing.
+
+The check and the record are not one transaction. Two calls against the same scope that overlap can each pass the check before either records, so the cap can be exceeded. That includes two processes, and also two tool calls the agent runs together in one turn (the default is `tool_execution="concurrent"`). `SpendLedger` reads and records in separate calls, before and after the action, so a ledger cannot make the check atomic by itself.
+
+Where the cap must hold, run the agent that has the spending tools with `tool_execution="sequential"` and keep one writer per scope. `InMemorySpendLedger` is the in-process version, for tests and demos. `admit()` takes `ledger=` and a string `spend_scope=` directly.
 
 ::: locus.control.spend.SpendLedger
 ::: locus.control.spend.InMemorySpendLedger
@@ -361,14 +333,9 @@ and demos. `admit()` takes `ledger=` and a string `spend_scope=` directly.
 
 ### Judging the call
 
-The policy sees labels. `ToolCallJudge` reads the call, the tool's name and
-the arguments the model sent, against an intent written in words and optional
-per-tool guidance, and returns a typed `allow` / `hold` / `deny` with a
-one-line reason. Pass it to `gate_tool(judge=...)` and the verdict reaches
-`admit()` as `judgement`, where `tighten()` keeps the stricter of the policy's
-outcome and the judge's: an allow can become a hold or a deny, never the
-reverse. The verdict is on the audit entry under `judge`; a model error, an
-off-schema reply or a spent `budget` is a hold.
+The policy sees labels. `ToolCallJudge` reads the call, the tool's name and the arguments the model sent, against an intent written in words and optional per-tool guidance, and returns a typed `allow` / `hold` / `deny` with a one-line reason.
+
+Pass it to `gate_tool(judge=...)` and the verdict reaches `admit()` as `judgement`, where `tighten()` keeps the stricter of the policy's outcome and the judge's: an allow can become a hold or a deny, never the reverse. The verdict is on the audit entry under `judge`; a model error, an off-schema reply or a spent `budget` is a hold.
 
 ```python
 from locus.control import ControlPolicy, ToolCallJudge, gate_tool

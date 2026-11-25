@@ -86,19 +86,11 @@ backend for one is not a backend for the other.
 
 ## Long-term memory manager
 
-`LLMMemoryManager` is the default — with no `extract_fn` it uses a
-built-in keyword heuristic to extract and categorize memories at
-session end (pass an async `extract_fn` to use a model) and retrieves
-the top-k relevant entries at session start. `NoopMemoryManager` is the
-pass-through used in tests. `Mem0MemoryManager` (behind the `mem0`
-extra, `pip install "locus-sdk[mem0]"`) hands the finished
-conversation to the open-source mem0 library, which does its own
-extraction and keeps the memories in mem0's own vector store rather
-than a `BaseStore`. `OracleAgentMemoryManager` (behind the `agentmemory`
-extra) delegates to Oracle's official
-[`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) client —
-context-card summaries and scoped retrieval by user, agent and thread on
-Oracle Database 26ai.
+`LLMMemoryManager` is the default — with no `extract_fn` it uses a built-in keyword heuristic to extract and categorize memories at session end (pass an async `extract_fn` to use a model) and retrieves the top-k relevant entries at session start. `NoopMemoryManager` is the pass-through used in tests.
+
+`Mem0MemoryManager` (behind the `mem0` extra, `pip install "locus-sdk[mem0]"`) hands the finished conversation to the open-source mem0 library, which does its own extraction and keeps the memories in mem0's own vector store rather than a `BaseStore`.
+
+`OracleAgentMemoryManager` (behind the `agentmemory` extra) delegates to Oracle's official [`oracleagentmemory`](https://pypi.org/project/oracleagentmemory/) client — context-card summaries and scoped retrieval by user, agent and thread on Oracle Database 26ai.
 
 ::: locus.memory.manager.BaseMemoryManager
 ::: locus.memory.manager.LLMMemoryManager

@@ -5,14 +5,9 @@ description: "Every Oracle Database 26ai primitive in the SDK — vector search,
 
 # Oracle Database 26ai
 
-The SDK treats Oracle Database 26ai as the place where an agent's state lives:
-vectors for retrieval, threads for continuity, memories for what it has
-learned, in the same database as the data it acts on. Each primitive is a
-first-class class directly on the `oracledb` driver, with no
-third-party adapter in between (`OracleAgentMemoryManager` alone sits on
-Oracle's own agent-memory client), and it works with the same `Agent` as
-everything else. The drawing groups them by what the database does for the
-agent and names the `Agent` surface each group is reached through.
+The SDK treats Oracle Database 26ai as the place where an agent's state lives: vectors for retrieval, threads for continuity, memories for what it has learned, in the same database as the data it acts on.
+
+Each primitive is a first-class class directly on the `oracledb` driver, with no third-party adapter in between (`OracleAgentMemoryManager` alone sits on Oracle's own agent-memory client), and it works with the same `Agent` as everything else. The drawing groups them by what the database does for the agent and names the `Agent` surface each group is reached through.
 
 {{ locus_diagram oracle-26ai-primitives }}
 
@@ -61,15 +56,9 @@ values from `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
 
 ### TLS-only or mutual TLS
 
-An Autonomous Database created without mutual TLS (`is_mtls_connection_required
-= false`, the default for a private endpoint) has no wallet. The client checks
-the server certificate against the public CAs, so `dsn`, `user` and `password`
-connect on their own when `dsn` is the connect descriptor from the console
-(`(description=...(protocol=tcps)...)`) or an Easy Connect string. To use a
-`tnsnames.ora` alias instead, pass the directory holding the file as
-`config_dir` — or set `TNS_ADMIN` and pass nothing. Do not pass that directory
-as `wallet_location`: python-oracledb then looks for a wallet file in it and
-fails with `DPY-6005`.
+An Autonomous Database created without mutual TLS (`is_mtls_connection_required = false`, the default for a private endpoint) has no wallet. The client checks the server certificate against the public CAs, so `dsn`, `user` and `password` connect on their own when `dsn` is the connect descriptor from the console (`(description=...(protocol=tcps)...)`) or an Easy Connect string.
+
+To use a `tnsnames.ora` alias instead, pass the directory holding the file as `config_dir` — or set `TNS_ADMIN` and pass nothing. Do not pass that directory as `wallet_location`: python-oracledb then looks for a wallet file in it and fails with `DPY-6005`.
 
 With mutual TLS, `wallet_location` is the unzipped wallet directory. It holds
 its own `tnsnames.ora`, so it resolves aliases too; `config_dir` is only needed
@@ -130,15 +119,9 @@ an on-disk index there instead.
 
 ### Hybrid search
 
-`OracleVectorStore` blends vector similarity with Oracle Text relevance on
-the same row. `ensure_text_index()` creates a `CTXSYS.CONTEXT` index on the
-content column, synchronised on commit, and
-`RAGRetriever(hybrid=True, hybrid_kwargs={"use_text_index": True})` scores
-each candidate as `hybrid_alpha` times the vector similarity plus the rest
-times the `SCORE()` of the query terms, so an error code or a product name
-that the embedding blurs still ranks first. A document that contains none of
-the query terms keeps its vector score, and without the text index the
-lexical leg is a `LIKE` match on the query tokens.
+`OracleVectorStore` blends vector similarity with Oracle Text relevance on the same row. `ensure_text_index()` creates a `CTXSYS.CONTEXT` index on the content column, synchronised on commit, and `RAGRetriever(hybrid=True, hybrid_kwargs={"use_text_index": True})` scores each candidate as `hybrid_alpha` times the vector similarity plus the rest times the `SCORE()` of the query terms, so an error code or a product name that the embedding blurs still ranks first.
+
+A document that contains none of the query terms keeps its vector score, and without the text index the lexical leg is a `LIKE` match on the query tokens.
 
 ```python
 store = OracleVectorStore(table_name="runbooks", dimension=1536, **db)

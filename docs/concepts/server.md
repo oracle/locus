@@ -1,16 +1,8 @@
 # Agent Server
 
-`AgentServer` is the reference way to run any `Agent` as a
-service — drop in an `Agent` (a refund bot, a deploy operator, an
-access-grant approver, or a SOC triage agent), and get a FastAPI app
-with `/invoke`, `/stream`, [threads and runs](#threads-and-runs) with a
-resumable event stream, a [live WebSocket](#live-websocket) and the two
-[UI wire protocols](#ui-wire-protocols) web agent UIs speak, out of the
-box. It re-emits the same event stream the Python API exposes as
-Server-Sent Events, gated by optional bearer-token auth. Most requests
-take the path below — the bearer check, one of the routes, the agent
-with its thread store, and a JSON or SSE reply; `/health` skips the
-check and the `/threads` routes read the store directly.
+`AgentServer` is the reference way to run any `Agent` as a service — drop in an `Agent` (a refund bot, a deploy operator, an access-grant approver, or a SOC triage agent), and get a FastAPI app with `/invoke`, `/stream`, [threads and runs](#threads-and-runs) with a resumable event stream, a [live WebSocket](#live-websocket) and the two [UI wire protocols](#ui-wire-protocols) web agent UIs speak, out of the box.
+
+It re-emits the same event stream the Python API exposes as Server-Sent Events, gated by optional bearer-token auth. Most requests take the path below — the bearer check, one of the routes, the agent with its thread store, and a JSON or SSE reply; `/health` skips the check and the `/threads` routes read the store directly.
 
 {{ locus_diagram server-request-flow }}
 
@@ -89,17 +81,16 @@ incrementally.
 
 ### 3. Call `/stream` (Server-Sent Events)
 
-`/stream` is a **POST** endpoint: the prompt comes from the JSON body
-and the token from the `Authorization` header. The browser `EventSource`
-API only issues GET requests, so it can't drive this route — use
-`fetch()` + a `ReadableStream` reader and parse the `data:` frames
-yourself. Each frame is `data: {json}\n\n`; the JSON carries a `type`
-field — `think`, `tool_start`, `tool_complete`, `done` and `error` keep
-their historical shapes, `model_chunk` is a token delta (on by default;
-`stream_tokens=False` on the server turns it off), `interrupt` is a
-pause, and every other event is its `model_dump` under its `type` — and
-the stream ends with a literal `data: [DONE]` frame. The route does
-**not** emit named SSE events.
+`/stream` is a **POST** endpoint: the prompt comes from the JSON body and the token from the `Authorization` header. The browser `EventSource` API only issues GET requests, so it can't drive this route — use `fetch()` + a `ReadableStream` reader and parse the `data:` frames yourself.
+
+Each frame is `data: {json}\n\n`; the JSON carries a `type` field:
+
+- `think`, `tool_start`, `tool_complete`, `done` and `error` keep their historical shapes
+- `model_chunk` is a token delta (on by default; `stream_tokens=False` on the server turns it off)
+- `interrupt` is a pause
+- every other event is its `model_dump` under its `type`
+
+The stream ends with a literal `data: [DONE]` frame. The route does **not** emit named SSE events.
 
 ```javascript
 const res = await fetch("/stream", {
@@ -168,20 +159,11 @@ server = AgentServer(
 server.run(host="0.0.0.0", port=8080)
 ```
 
-The request's `prompt` lands in the graph's initial state under
-`input_key`. Each streamed graph event goes out on `/stream` as a
-`think` frame, and the final state's `output_key` value becomes the
-`message` of the `done` frame and of the `/invoke` response (with no
-`output_key`, the whole final state is stringified). `thread_id` and
-`metadata` are accepted but not passed to the graph, so the
-[case persistence](#case-persistence) flow does not apply: `GraphRunnable`
-has no `config`, so `GET /threads/{tid}` answers from the server's
-in-memory [run registry](#threads-and-runs) only (the thread's runs, no
-transcript). `/resume` answers 404 — `GraphRunnable` has no `resume()`,
-so the [human-in-the-loop](#human-in-the-loop) flow below applies to
-`Agent` only; a cancel on a graph run stops its task outright, since
-there is no `cancel()` to ask first. The same adapter slots into
-`locus.a2a.A2AServer`.
+The request's `prompt` lands in the graph's initial state under `input_key`. Each streamed graph event goes out on `/stream` as a `think` frame, and the final state's `output_key` value becomes the `message` of the `done` frame and of the `/invoke` response (with no `output_key`, the whole final state is stringified).
+
+`thread_id` and `metadata` are accepted but not passed to the graph, so the [case persistence](#case-persistence) flow does not apply: `GraphRunnable` has no `config`, so `GET /threads/{tid}` answers from the server's in-memory [run registry](#threads-and-runs) only (the thread's runs, no transcript).
+
+`/resume` answers 404 — `GraphRunnable` has no `resume()`, so the [human-in-the-loop](#human-in-the-loop) flow below applies to `Agent` only; a cancel on a graph run stops its task outright, since there is no `cancel()` to ask first. The same adapter slots into `locus.a2a.A2AServer`.
 
 ## Endpoints
 
@@ -241,46 +223,24 @@ curl -sN http://localhost:8080/runs/3f1c…/events \
   -H "Last-Event-ID: 2"
 ```
 
-The frames are the `/stream` shapes (`think`, `tool_start`,
-`tool_complete`, `model_chunk`, `interrupt`, `done`, `error`, …), each
-preceded by an `id:` line that numbers the event from 1. A client keeps
-the last id it saw and sends it back as `Last-Event-ID` when it
-reconnects; the server replays every retained event after it and then
-follows the run live. A stream always ends with `data: [DONE]`, including
-a reconnect that has nothing left to deliver. The browser `EventSource`
-API does this bookkeeping on its own, but cannot set the `Authorization`
-header, so the reference page under
-[`examples/server_ui/`](https://github.com/oracle/locus/tree/main/examples/server_ui)
-uses `fetch()` and keeps the id itself.
+The frames are the `/stream` shapes (`think`, `tool_start`, `tool_complete`, `model_chunk`, `interrupt`, `done`, `error`, …), each preceded by an `id:` line that numbers the event from 1. A client keeps the last id it saw and sends it back as `Last-Event-ID` when it reconnects; the server replays every retained event after it and then follows the run live.
 
-**Threads.** `POST /threads` creates one (a client-chosen `thread_id` or
-a minted one) and is optional: a run on a thread id the server has not
-seen creates the thread. `GET /threads/{tid}` answers from the agent's
-checkpointer when one is configured — the transcript, `iteration`,
-`tool_executions` — and adds the thread's `runs` from the server's
-registry; `source` says which answered (`checkpointer` or `registry`).
-Without a checkpointer the server keeps no transcript: the thread is
-known for its runs only, and only for as long as the registry keeps it.
-`DELETE /threads/{tid}` drops the checkpoint and forgets the thread's
-finished runs.
+A stream always ends with `data: [DONE]`, including a reconnect that has nothing left to deliver. The browser `EventSource` API does this bookkeeping on its own, but cannot set the `Authorization` header, so the reference page under [`examples/server_ui/`](https://github.com/oracle/locus/tree/main/examples/server_ui) uses `fetch()` and keeps the id itself.
 
-**Runs.** One run at a time per thread (a second `POST` answers 409
-`run_in_progress`). `GET /runs/{rid}` reports `status` — `queued`,
-`running`, then `completed`, `interrupted` (paused on an approval or an
-`ask_user` question; the `interrupt` field holds the pause), `cancelled`
-or `failed` (`error_correlation_id` names the log entry) — along with
-`event_count`, `message` and `stop_reason`. Continue a paused thread
-with `{"resume": {"response": "...", "decision": {...},
-"perform_dangling": true}}` in the body of `POST /threads/{tid}/runs`:
-the same semantics as [`/resume`](#human-in-the-loop) (409
-`approval_pending` while the decision is missing, 404 when nothing is
-paused), as a new run with its own id. `POST /runs/{rid}/cancel` asks an
-`Agent` to stop through `agent.cancel(thread_id=...)`, so the loop
-finishes its current step, writes its checkpoint and ends with
-`stop_reason` `cancelled`; if it has not stopped after
-`cancel_grace_seconds` (5 by default), or the runnable has no `cancel()`,
-the run's task is cancelled outright and a synthetic
-`{"type": "done", "reason": "cancelled"}` closes the stream.
+**Threads.** `POST /threads` creates one (a client-chosen `thread_id` or a minted one) and is optional: a run on a thread id the server has not seen creates the thread. `GET /threads/{tid}` answers from the agent's checkpointer when one is configured — the transcript, `iteration`, `tool_executions` — and adds the thread's `runs` from the server's registry; `source` says which answered (`checkpointer` or `registry`).
+
+Without a checkpointer the server keeps no transcript: the thread is known for its runs only, and only for as long as the registry keeps it. `DELETE /threads/{tid}` drops the checkpoint and forgets the thread's finished runs.
+
+**Runs.** One run at a time per thread (a second `POST` answers 409 `run_in_progress`). `GET /runs/{rid}` reports `status`, along with `event_count`, `message` and `stop_reason`. The status is `queued`, `running`, then one of:
+
+- `completed`
+- `interrupted` (paused on an approval or an `ask_user` question; the `interrupt` field holds the pause)
+- `cancelled`
+- `failed` (`error_correlation_id` names the log entry)
+
+Continue a paused thread with `{"resume": {"response": "...", "decision": {...}, "perform_dangling": true}}` in the body of `POST /threads/{tid}/runs`: the same semantics as [`/resume`](#human-in-the-loop) (409 `approval_pending` while the decision is missing, 404 when nothing is paused), as a new run with its own id.
+
+`POST /runs/{rid}/cancel` asks an `Agent` to stop through `agent.cancel(thread_id=...)`, so the loop finishes its current step, writes its checkpoint and ends with `stop_reason` `cancelled`. If it has not stopped after `cancel_grace_seconds` (5 by default), or the runnable has no `cancel()`, the run's task is cancelled outright and a synthetic `{"type": "done", "reason": "cancelled"}` closes the stream.
 
 **Bounds.** The registry is in memory and bounded; the limits are the
 arguments of `RunRegistry`, passed as `AgentServer(run_registry=...)`:
@@ -299,15 +259,9 @@ server = AgentServer(
 )
 ```
 
-A reconnect that reaches past the retained window gets one
-`{"type": "replay_gap", "from": N, "to": M}` frame naming the sequence
-numbers it missed, then whatever is still held; `GET /runs/{rid}` for a
-forgotten run is a 404. The registry is per process: a run started on
-one worker is known to that worker only, so put sticky routing in front
-of a multi-worker deployment, or run one worker per replica. Thread
-*state* is a different matter — that lives in the checkpointer and is
-shared the way the [case persistence](#case-persistence) section
-describes.
+A reconnect that reaches past the retained window gets one `{"type": "replay_gap", "from": N, "to": M}` frame naming the sequence numbers it missed, then whatever is still held; `GET /runs/{rid}` for a forgotten run is a 404.
+
+The registry is per process: a run started on one worker is known to that worker only, so put sticky routing in front of a multi-worker deployment, or run one worker per replica. Thread *state* is a different matter — that lives in the checkpointer and is shared the way the [case persistence](#case-persistence) section describes.
 
 ## Live WebSocket
 
@@ -328,18 +282,15 @@ optional `ref` the server echoes:
 | `subscribe` | `run_id`, optional `after` | follow a run started elsewhere, from a sequence number |
 | `ping` | — | `pong` |
 
-The server answers `run_started` (`run_id`, `thread_id`), then one
-`event` frame per run event (`run_id`, `seq`, `event` — the same payload
-the SSE route sends), then `run_finished` with the run's `status`; a
-refused request is an `error` frame with the `code` and `detail` the HTTP
-route would have returned (`approval_pending` carries the interrupt
-details too), and `cancelled` reports whether a cancel was accepted.
-Several runs can be in flight on one socket; the `run_id` on every frame
-tells them apart. Voice frames are not carried: the realtime sessions in
-`locus.voice` are provider-socket clients with their own event
-vocabulary and no run binding, so a voice application drives a
-`RealtimeSession` directly for now. Tool results from client-executed
-tools are not carried either — the server runs its tools itself.
+The server answers with these frames, in order:
+
+- `run_started` (`run_id`, `thread_id`)
+- one `event` frame per run event (`run_id`, `seq`, `event` — the same payload the SSE route sends)
+- `run_finished` with the run's `status`
+
+A refused request is an `error` frame with the `code` and `detail` the HTTP route would have returned (`approval_pending` carries the interrupt details too), and `cancelled` reports whether a cancel was accepted. Several runs can be in flight on one socket; the `run_id` on every frame tells them apart.
+
+Voice frames are not carried: the realtime sessions in `locus.voice` are provider-socket clients with their own event vocabulary and no run binding, so a voice application drives a `RealtimeSession` directly for now. Tool results from client-executed tools are not carried either — the server runs its tools itself.
 
 ## UI wire protocols
 
@@ -347,21 +298,16 @@ Two web-UI protocols are served from the same runs and the same history,
 so a front end can speak the protocol its components already understand
 and still cancel or resume through the run resources.
 
-**AG-UI.** `POST /ag-ui` takes a `RunAgentInput` (`threadId`, `runId`,
-`messages`, `tools`, `context`, `state`, `forwardedProps`) and streams
-AG-UI events: `RUN_STARTED`, a `STATE_SNAPSHOT` (`status`, `iteration`,
-`toolCalls`) with `STATE_DELTA` JSON Patch updates as the run moves,
-`TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END` for
-assistant text, `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END`
-and `TOOL_CALL_RESULT` for tool calls, `CUSTOM` for everything else
-(`locus.interrupt`, `locus.reasoning`, `locus.<event type>`, and a Locus
-`CustomEvent` under its own name), and `RUN_FINISHED` (with `result`, or
-`outcome: {"type": "interrupt", ...}` when the run paused) or
-`RUN_ERROR`. The prompt is the last `user` message; `forwardedProps`
-becomes the run's client metadata; the input's `tools` and `state` are
-not consumed (the server's tools run server-side). The same frames are
-available for any run as `GET /runs/{rid}/events?protocol=ag-ui`,
-`Last-Event-ID` included.
+**AG-UI.** `POST /ag-ui` takes a `RunAgentInput` (`threadId`, `runId`, `messages`, `tools`, `context`, `state`, `forwardedProps`) and streams AG-UI events:
+
+- `RUN_STARTED`
+- a `STATE_SNAPSHOT` (`status`, `iteration`, `toolCalls`) with `STATE_DELTA` JSON Patch updates as the run moves
+- `TEXT_MESSAGE_START` / `TEXT_MESSAGE_CONTENT` / `TEXT_MESSAGE_END` for assistant text
+- `TOOL_CALL_START` / `TOOL_CALL_ARGS` / `TOOL_CALL_END` and `TOOL_CALL_RESULT` for tool calls
+- `CUSTOM` for everything else (`locus.interrupt`, `locus.reasoning`, `locus.<event type>`, and a Locus `CustomEvent` under its own name)
+- `RUN_FINISHED` (with `result`, or `outcome: {"type": "interrupt", ...}` when the run paused) or `RUN_ERROR`
+
+The prompt is the last `user` message; `forwardedProps` becomes the run's client metadata; the input's `tools` and `state` are not consumed (the server's tools run server-side). The same frames are available for any run as `GET /runs/{rid}/events?protocol=ag-ui`, `Last-Event-ID` included.
 
 **Vercel AI SDK UI message stream.** `POST /vercel-ai` takes the request
 a `useChat`-style client sends (`id`, `messages` with `parts`; the chat
@@ -374,23 +320,15 @@ the `x-vercel-ai-ui-message-stream: v1` header and the stream parts
 `finish-step`, `finish` and the `[DONE]` terminator. Also
 `GET /runs/{rid}/events?protocol=vercel-ai`.
 
-Where the published protocol pages leave a choice, the conservative
-reading was taken: assistant text comes from token deltas when the
-server streams them (`stream_tokens=True`, the default) and from the
-`think` content otherwise, never both, and the final `done` message is
-not repeated when it equals the text already sent; tool arguments are
-sent whole (one `TOOL_CALL_ARGS` delta, a `tool-input-available` right
-after `tool-input-start`); a tool failure is a result whose content is an
-`{"error": "..."}` object rather than a stream-level error, so the UI
-keeps rendering; an interrupt is a `CUSTOM` / `data-locus-interrupt`
-frame followed by the protocol's run-finished frames, and the answer goes
-through `POST /threads/{tid}/runs` with `resume` (or the socket's
-`resume` message); one step per run (`start-step` / `finish-step`) rather
-than one per model call. On a reconnect with `Last-Event-ID`, the
-adapter rebuilds its state from the retained history, so message ids
-match the ones the client already holds. The `id:` line sits on the last
-frame of each event's group: a drop in the middle of a group resumes
-from the event before it and shows the whole group again.
+Where the published protocol pages leave a choice, the conservative reading was taken:
+
+- assistant text comes from token deltas when the server streams them (`stream_tokens=True`, the default) and from the `think` content otherwise, never both, and the final `done` message is not repeated when it equals the text already sent
+- tool arguments are sent whole (one `TOOL_CALL_ARGS` delta, a `tool-input-available` right after `tool-input-start`)
+- a tool failure is a result whose content is an `{"error": "..."}` object rather than a stream-level error, so the UI keeps rendering
+- an interrupt is a `CUSTOM` / `data-locus-interrupt` frame followed by the protocol's run-finished frames, and the answer goes through `POST /threads/{tid}/runs` with `resume` (or the socket's `resume` message)
+- one step per run (`start-step` / `finish-step`) rather than one per model call
+
+On a reconnect with `Last-Event-ID`, the adapter rebuilds its state from the retained history, so message ids match the ones the client already holds. The `id:` line sits on the last frame of each event's group: a drop in the middle of a group resumes from the event before it and shows the whole group again.
 
 `/docs`, `/redoc`, and `/openapi.json` are only mounted when
 `debug=True` in your settings — production deployments don't expose
