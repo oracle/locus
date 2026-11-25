@@ -57,21 +57,16 @@ like this out of the box:
 }
 ```
 
-The keys are exactly those the hook sets: `message`, `event` (the
-message lowercased with spaces as underscores — e.g.
-`tool_call_completed`), `tool_name`, `success`, and `timestamp`, with
-an `error` key when the call failed. `StructuredLoggingHook` hard-wires
-`log_arguments=False` and `log_results=False` and exposes no
-constructor option to turn them on, so the matching `tool_call_starting`
-record carries `tool_name` plus `argument_keys` (names only, no values),
-and neither record carries argument values or tool results. If you need
-`result_preview` + `result_length`, use the parent
-`LoggingHook(log_results=True)` instead — it attaches them as attributes
-on the standard `logging` record (no `event` or `timestamp` key) — and
-note that results and arguments may contain PII.
-Anything you pass as `extra={...}` to the hook
-constructor is merged into **every** record — that's how you stamp a
-stable `agent_id` / `thread_id` for correlation.
+The keys are exactly those the hook sets:
+
+- `message`, and `event`: the message lowercased with spaces as underscores, e.g. `tool_call_completed`.
+- `tool_name`, `success` and `timestamp`, with an `error` key when the call failed.
+
+`StructuredLoggingHook` hard-wires `log_arguments=False` and `log_results=False` and exposes no constructor option to turn them on. The matching `tool_call_starting` record carries `tool_name` plus `argument_keys` (names only, no values), and neither record carries argument values or tool results.
+
+If you need `result_preview` + `result_length`, use the parent `LoggingHook(log_results=True)` instead. It attaches them as attributes on the standard `logging` record (no `event` or `timestamp` key), and results and arguments may contain PII.
+
+Anything you pass as `extra={...}` to the hook constructor is merged into **every** record — that's how you stamp a stable `agent_id` / `thread_id` for correlation.
 
 Pipe stdout to your log aggregator. The SDK doesn't own the transport —
 you choose between stdlib `logging`, `structlog`, or
@@ -148,17 +143,11 @@ trail.verify()                 # re-reads the rows, recomputes the chain, asks t
 verify_anchor(trail, store)    # the chain still reaches the last anchored head
 ```
 
-`OracleAuditTrail` has the same API as `AuditTrail`, so `admit(trail=...)`,
-`gate_tool(trail=...)` and `governed_agent(audit_trail=...)` take it
-unchanged; `record()` commits before it returns, and `arecord()` /
-`averify()` run the same work on a worker thread for async code.
-`require_retention_rule=True` refuses to anchor into a bucket that has no
-retention rule (OCI) or Object Lock (S3), so a bucket that can be emptied
-is never mistaken for an anchor; the rule itself is the bucket's
-configuration. `anchor_periodically()` is the loop a server or runner
-calls. The table and the rule outlive the agent on purpose: an immutable
-table cannot be dropped inside its idle window, and a locked retention
-rule cannot be shortened.
+`OracleAuditTrail` has the same API as `AuditTrail`, so `admit(trail=...)`, `gate_tool(trail=...)` and `governed_agent(audit_trail=...)` take it unchanged. `record()` commits before it returns; `arecord()` / `averify()` run the same work on a worker thread for async code.
+
+`require_retention_rule=True` refuses to anchor into a bucket that has no retention rule (OCI) or Object Lock (S3), so a bucket that can be emptied is never mistaken for an anchor. The rule itself is the bucket's configuration. `anchor_periodically()` is the loop a server or runner calls.
+
+The table and the rule outlive the agent on purpose: an immutable table cannot be dropped inside its idle window, and a locked retention rule cannot be shortened.
 
 ### Traces and metrics over OTLP
 
@@ -191,39 +180,27 @@ without a mapping layer:
 | `chat <model>` | CLIENT | model call | `gen_ai.operation.name=chat`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.conversation.id`, `gen_ai.usage.input_tokens` / `output_tokens` (and `gen_ai.usage.cache_read.input_tokens` / `cache_write.input_tokens` when the provider reports them), `gen_ai.response.finish_reasons`, `gen_ai.response.id` (server-stateful transports), `server.address` / `server.port` (the endpoint host), `error.type` when the call never returned |
 | `execute_tool <tool>` | INTERNAL | tool call | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type=function`, `gen_ai.tool.description`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `error.type` on failure; `gen_ai.tool.call.arguments` and `gen_ai.tool.call.result` only with `record_arguments` / `record_results` |
 
-Iterations nest under the run; model and tool spans nest under their
-iteration. The root span is a child of the tool call in flight when the
-run starts inside one — a sub-agent exposed as a tool files its
-`invoke_agent` under the orchestrator's `execute_tool` span — else of
-whatever OpenTelemetry context is current, so a run served behind an
-HTTP handler, an A2A request or an MCP call files under the caller's
-trace (see [Trace context in and out](#trace-context-in-and-out)). The
-hook keeps its state per run: one `Agent` serving concurrent `arun()`
-calls files one trace per run, each with its own iterations and totals.
+Iterations nest under the run; model and tool spans nest under their iteration. The root span's parent depends on where the run starts:
 
-A hook that asks the loop to call the model again (`event.retry`, as
-`ModelRetryHook` does) ends the `chat` span of the discarded call with
-`locus.retry_requested` and the retried call gets a `chat` span of its own
-with `locus.retry_attempt`, so every attempt is one span and counts once;
-the provider-level retries of the agent's `model_retry` policy happen
-inside one `chat` span. A model call that raised is closed as an error
-with `error.type` and its duration recorded; a run that fails or is
-cancelled closes the tool and iteration spans it left open the same way,
-so a failed run's trace still passes `validate_spans`.
+- Inside a tool call in flight, the root is a child of that call: a sub-agent exposed as a tool files its `invoke_agent` under the orchestrator's `execute_tool` span.
+- Otherwise it is a child of whatever OpenTelemetry context is current, so a run served behind an HTTP handler, an A2A request or an MCP call files under the caller's trace (see [Trace context in and out](#trace-context-in-and-out)).
 
-The `Agent` lends the hook its model and tools when it is constructed, so
-`gen_ai.request.model` is the model id (`openai.gpt-4.1` for
-`oci:openai.gpt-4.1`), `gen_ai.provider.name` the provider
-(`oci.generative_ai`, `openai`, `anthropic`; for an OpenAI-compatible
-endpoint the SDK's provider table knows by host and port — Groq, DeepSeek,
-Mistral, xAI, Perplexity, or a local vLLM, Ollama or LM Studio on its
-default port — that provider's value, for any other `openai`, with
-`server.address` naming the host) and `gen_ai.tool.description` each
-tool's docstring. `gen_ai.agent.name` is the agent's `name` (or
-`agent_id`). `TelemetryHook(model=..., provider_name=..., agent_name=...)`
-sets any of them by hand — a `FallbackChain`, say, has no single model
-id. The `telemetry` extra is the OpenTelemetry API, SDK and OTLP
-exporters:
+The hook keeps its state per run: one `Agent` serving concurrent `arun()` calls files one trace per run, each with its own iterations and totals.
+
+Retries and failures keep to one span per attempt:
+
+- A hook that asks the loop to call the model again (`event.retry`, as `ModelRetryHook` does) ends the `chat` span of the discarded call with `locus.retry_requested`; the retried call gets a `chat` span of its own with `locus.retry_attempt`, so every attempt is one span and counts once.
+- The provider-level retries of the agent's `model_retry` policy happen inside one `chat` span.
+- A model call that raised is closed as an error with `error.type` and its duration recorded.
+- A run that fails or is cancelled closes the tool and iteration spans it left open the same way, so a failed run's trace still passes `validate_spans`.
+
+The `Agent` lends the hook its model and tools when it is constructed, so the identifying attributes need no configuration:
+
+- `gen_ai.request.model` is the model id: `openai.gpt-4.1` for `oci:openai.gpt-4.1`.
+- `gen_ai.provider.name` is the provider: `oci.generative_ai`, `openai` or `anthropic`. For an OpenAI-compatible endpoint the SDK's provider table knows by host and port (Groq, DeepSeek, Mistral, xAI, Perplexity, or a local vLLM, Ollama or LM Studio on its default port) it is that provider's value; for any other it is `openai`, with `server.address` naming the host.
+- `gen_ai.tool.description` is each tool's docstring, and `gen_ai.agent.name` is the agent's `name` (or `agent_id`).
+
+`TelemetryHook(model=..., provider_name=..., agent_name=...)` sets any of them by hand — a `FallbackChain`, say, has no single model id. The `telemetry` extra is the OpenTelemetry API, SDK and OTLP exporters:
 
 ```bash
 pip install "locus-sdk[telemetry]"
@@ -261,18 +238,14 @@ earlier one stays selectable.
 
 #### Checking a trace
 
-`locus.observability.semconv.validate_spans(spans)` checks finished spans —
-from the SDK's in-memory exporter, or a recorded trace — against the
-conventions: one trace, one `invoke_agent` root, the kind and name each
-operation requires, the required attributes present and typed, `error.type`
-on every failed span, and no misspelled `gen_ai.*` key. It returns the
-problems, one line each; `assert_valid_spans` raises with them. When the
-exporter also caught spans from other instrumentation scopes — FastAPI's
-`POST /`, the `mcp` package's `MCP send …` — only the hook's own scope
-(`locus.hooks.telemetry`) is checked, so those are not reported as foreign
-roots or extra traces; `scope=` names another, `scope=None` checks
-everything. Notebook
-60 runs it on the trace of its ticket reply:
+`locus.observability.semconv.validate_spans(spans)` checks finished spans — from the SDK's in-memory exporter, or a recorded trace — against the conventions:
+
+- one trace, with one `invoke_agent` root;
+- the kind and name each operation requires;
+- the required attributes present and typed, and `error.type` on every failed span;
+- no misspelled `gen_ai.*` key.
+
+It returns the problems, one line each; `assert_valid_spans` raises with them. When the exporter also caught spans from other instrumentation scopes — FastAPI's `POST /`, the `mcp` package's `MCP send …` — only the hook's own scope (`locus.hooks.telemetry`) is checked, so those are not reported as foreign roots or extra traces. `scope=` names another scope and `scope=None` checks everything. Notebook 60 runs it on the trace of its ticket reply:
 
 ```python
 from opentelemetry import trace
@@ -325,33 +298,22 @@ print(f"iterations: {result.metrics.iterations}")
 print(f"cost_usd:   {result.metrics.cost_usd}")
 ```
 
-`cost_usd` is the spend in USD, computed from the model's
-per-million-token prices in the SDK's model metadata. Like the token
-counts, it adds up across turns when you resume a checkpointed
-`thread_id`, so on a resumed thread it is the thread's total so far,
-not just the latest turn's. It is `None` —
-unpriced, never free — when those prices are unknown. The built-in
-table prices only some models. Lookup strips the SDK's own provider
-prefixes (`openai:`, `anthropic:` and the OpenAI-compatible routing
-prefixes such as `vllm:` or `openrouter:`) and then needs an entry for
-the slug that remains: a dated snapshot or `-latest` suffix resolves to
-its base slug, but a longer id never inherits a shorter entry's price.
-An OCI id resolves the entry of the model it serves: `oci:openai.gpt-5.5`
-is `gpt-5.5`, so the `{{ locus_example_model }}` agent above reports a
-`cost_usd` from OpenAI's list price for that model. OCI bills at its
-own rates, and the Cohere, Meta, Google and xAI entries carry windows
-but no prices (`cost_usd` is `None` on them), so register the rate
-your route bills under the model's full id with
-`register_metadata(ModelMetadata(model_id="{{ locus_example_model }}", ..., input_price_per_mtok=..., output_price_per_mtok=...))`
-from `locus.models.metadata` before you construct the agent; the entry
-is stored under the id with its provider prefix stripped, so it is
-found under `{{ locus_example_model }}` and `openai.gpt-5.5` alike and
-wins over the built-in record. Prices are read once, when the `Agent`
-is built. The same prices drive `max_cost_usd`: set a budget on an
-unpriced model and the `Agent` constructor raises `ValueError` rather
-than run a budget that could never stop anything.
-For dashboards, key on `agent_id` plus the same metrics the
-`TelemetryHook` already emits — no glue code needed.
+`cost_usd` is the spend in USD, computed from the model's per-million-token prices in the SDK's model metadata. Like the token counts, it adds up across turns when you resume a checkpointed `thread_id`, so on a resumed thread it is the thread's total so far, not just the latest turn's. It is `None` — unpriced, never free — when those prices are unknown.
+
+The built-in table prices only some models, and lookup works like this:
+
+- Lookup strips the SDK's own provider prefixes (`openai:`, `anthropic:` and the OpenAI-compatible routing prefixes such as `vllm:` or `openrouter:`) and then needs an entry for the slug that remains.
+- A dated snapshot or `-latest` suffix resolves to its base slug, but a longer id never inherits a shorter entry's price.
+- An OCI id resolves the entry of the model it serves: `oci:openai.gpt-5.5` is `gpt-5.5`, so the `{{ locus_example_model }}` agent above reports a `cost_usd` from **OpenAI's list price** for that model. OCI bills at its own rates, which the table does not carry.
+- The Cohere, Meta, Google and xAI entries carry windows but no prices, so `cost_usd` is `None` on them.
+
+To price a route at the rate it is actually billed, register that rate yourself:
+
+- Call `register_metadata(ModelMetadata(model_id="{{ locus_example_model }}", ..., input_price_per_mtok=..., output_price_per_mtok=...))` from `locus.models.metadata` with the model's full id before you construct the agent.
+- The entry is stored under the id with its provider prefix stripped, so it is found under `{{ locus_example_model }}` and `openai.gpt-5.5` alike and wins over the built-in record.
+- Prices are read once, when the `Agent` is built.
+
+The same prices drive `max_cost_usd`: set a budget on an unpriced model and the `Agent` constructor raises `ValueError` rather than run a budget that could never stop anything. For dashboards, key on `agent_id` plus the same metrics the `TelemetryHook` already emits — no glue code needed.
 
 ## Export
 
@@ -419,24 +381,15 @@ result = agent.run_sync("Resolve the duplicate charge on ord-4821.")
 installation.shutdown()
 ```
 
-`install()` returns the `(tracer_provider, meter_provider)` pair it set up
-— it unpacks as a tuple — with `force_flush()` and `shutdown()` that reach
-what the call added. Use that `shutdown()` rather than the providers':
-a `MeterProvider` already in place does not flush a reader added to it
-after construction, so the last metrics interval would be lost; when
-`install()` joined existing providers it also registers its `shutdown()`
-with `atexit`, so the exit flush happens with no code of yours. Both
-arguments default to the `OCI_APM_DATA_UPLOAD_ENDPOINT` and
-`OCI_APM_PRIVATE_DATA_KEY` environment variables, so `oci_apm().install()`
-is the deployment form; `apm.span_processor()` and `apm.metric_reader()`
-plug into providers you already own. The exporters post to
-`<endpoint>/20200101/opentelemetry/private/v1/traces` and `/v1/metrics`
-with `Authorization: dataKey <key>`. In Trace Explorer the run is the
-`invoke_agent <name>` span under the service you named, with its `chat`
-and `execute_tool` children; the `gen_ai.*` attributes are span
-dimensions, so `show (spans) gen_ai.request.model,
-sum(gen_ai.usage.input_tokens) where OperationName like 'chat%' group by
-gen_ai.request.model` is the token bill by model.
+`install()` returns the `(tracer_provider, meter_provider)` pair it set up — it unpacks as a tuple — with `force_flush()` and `shutdown()` that reach what the call added. Use that `shutdown()` rather than the providers': a `MeterProvider` already in place does not flush a reader added to it after construction, so the last metrics interval would be lost. When `install()` joined existing providers it also registers its `shutdown()` with `atexit`, so the exit flush happens with no code of yours.
+
+The rest of the surface:
+
+- Both arguments default to the `OCI_APM_DATA_UPLOAD_ENDPOINT` and `OCI_APM_PRIVATE_DATA_KEY` environment variables, so `oci_apm().install()` is the deployment form.
+- `apm.span_processor()` and `apm.metric_reader()` plug into providers you already own.
+- The exporters post to `<endpoint>/20200101/opentelemetry/private/v1/traces` and `/v1/metrics` with `Authorization: dataKey <key>`.
+
+In Trace Explorer the run is the `invoke_agent <name>` span under the service you named, with its `chat` and `execute_tool` children. The `gen_ai.*` attributes are span dimensions, so `show (spans) gen_ai.request.model, sum(gen_ai.usage.input_tokens) where OperationName like 'chat%' group by gen_ai.request.model` is the token bill by model.
 
 [`examples/observability/oci_apm_dashboard.json`](https://github.com/oracle/locus/blob/main/examples/observability/oci_apm_dashboard.json)
 is a Management Dashboard definition — agent runs and latency, tool
