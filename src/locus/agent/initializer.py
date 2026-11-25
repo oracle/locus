@@ -223,10 +223,19 @@ def initialize_agent(agent: Agent) -> None:
         agent._model_prices = (float(meta.input_price_per_mtok), float(meta.output_price_per_mtok))
     if agent.config.max_cost_usd is not None and agent._model_prices is None:
         # Fail closed: a budget that cannot measure spend would never stop anything.
+        from locus.models.metadata import oci_served_slug
+
+        served = oci_served_slug(model_id) if model_id is not None else None
+        why = (
+            f"OCI Generative AI bills {served!r} at its own rates, which the catalogue "
+            "does not carry, so "
+            if served is not None
+            else ""
+        )
         raise ValueError(
-            f"max_cost_usd needs prices for model {model_id!r}. Register them with "
-            "locus.models.metadata.register_metadata(ModelMetadata(..., "
-            "input_price_per_mtok=..., output_price_per_mtok=...))."
+            f"max_cost_usd needs prices for model {model_id!r}: {why}register the rate you "
+            f"are billed with locus.models.metadata.register_metadata(ModelMetadata("
+            f"model_id={model_id!r}, ..., input_price_per_mtok=..., output_price_per_mtok=...))."
         )
     context_window = _context_window(agent, meta.context_length if meta is not None else None)
     if agent.config.conversation_manager is not None:

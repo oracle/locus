@@ -203,7 +203,9 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
     forms. Only prefixes Locus's providers use are stripped; anything
     else is treated as part of the slug. An OCI Generative AI id,
     ``<vendor>.<model>`` with or without ``oci:``, resolves the entry of
-    the model it serves: ``"oci:openai.gpt-4.1"`` is ``gpt-4.1``.
+    the model it serves: ``"oci:openai.gpt-4.1"`` is ``gpt-4.1`` — for its
+    window and output cap only. OCI bills at its own rates, so the prices
+    come back ``None`` unless a rate was registered under the OCI id.
     """
     key = _strip_prefix(model_id.strip())
     with _lock:
@@ -211,8 +213,32 @@ def metadata_for(model_id: str) -> ModelMetadata | None:
         if found is None:
             bare = _oci_bare(key)
             if bare is not None:
-                found = _lookup(bare)
+                served = _lookup(bare)
+                if served is not None:
+                    found = _unpriced(served)
         return found
+
+
+def _unpriced(md: ModelMetadata) -> ModelMetadata:
+    """``md`` with its prices dropped.
+
+    An OCI Generative AI id answers with the window and output cap of the
+    model it serves, never with that model's list price: OCI bills at its
+    own rates, which the built-in table does not carry. A rate registered
+    under the OCI id itself is found before this step and keeps its prices.
+    """
+    if md.input_price_per_mtok is None and md.output_price_per_mtok is None:
+        return md
+    return md.model_copy(update={"input_price_per_mtok": None, "output_price_per_mtok": None})
+
+
+def oci_served_slug(model_id: str) -> str | None:
+    """The slug an OCI Generative AI id serves, or ``None`` for any other id.
+
+    ``"oci:openai.gpt-5.5"`` and ``"openai.gpt-5.5"`` give ``"gpt-5.5"``;
+    ``"openai:gpt-5.5"`` gives ``None``.
+    """
+    return _oci_bare(_strip_prefix(model_id.strip()))
 
 
 def _lookup(key: str) -> ModelMetadata | None:
@@ -526,7 +552,8 @@ for _slug, _in, _out in (
 # Prices are the short-context rates; above 272,000 input tokens OpenAI bills
 # input at twice and output at 1.5 times these figures for the whole request,
 # which this table does not model. OCI Generative AI serves the same ids as
-# ``openai.<slug>``. ``gpt-5.6-sol``'s rate is the promotional one the page
+# ``openai.<slug>`` at its own rates; through an OCI id these entries answer
+# with window and cap only. ``gpt-5.6-sol``'s rate is the promotional one the page
 # lists through 2026-11-30; refresh it when the standard rate is published.
 for _slug, _in, _out in (
     ("gpt-5.6-luna", "0.20", "1.20"),

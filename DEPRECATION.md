@@ -23,6 +23,14 @@ A deprecated API will:
 3. Be listed in `CHANGELOG.md` with its planned removal version and a
    migration snippet.
 
+### Changed in 6.7
+
+- An OCI Generative AI model id (`oci:<vendor>.<model>`) no longer carries
+  the served model's list price. `cost_usd` is `None` and `max_cost_usd` is
+  refused on such an id until a rate is registered under the full id with
+  `locus.models.metadata.register_metadata`. Migration: register the rate
+  you are billed before constructing the agent (see the observability page).
+
 ### Deprecated in 6.2
 
 - `locus.observability.emit.EV_MEMORY_CONVERSATION_ADDED`

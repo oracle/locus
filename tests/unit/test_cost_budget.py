@@ -168,6 +168,71 @@ def test_a_budget_on_an_unpriced_model_is_refused_when_the_agent_is_built() -> N
         )
 
 
+def test_an_oci_id_is_unpriced_so_its_run_reports_no_cost() -> None:
+    # OCI bills at its own rates: the served model's list price must not
+    # turn into a cost_usd on an oci: agent.
+    calls: list[int] = []
+    agent = Agent(
+        model=_looping_model("oci:openai.gpt-5.5", calls),
+        tools=[lookup],
+        max_iterations=2,
+        reflexion=False,
+        grounding=False,
+    )
+
+    assert agent.run_sync("look it up").metrics.cost_usd is None
+
+
+def test_a_budget_on_an_oci_id_is_refused_and_names_the_fix() -> None:
+    with pytest.raises(
+        ValueError, match=r"OCI Generative AI bills 'gpt-5\.5' at its own rates"
+    ) as info:
+        Agent(
+            model=_looping_model("oci:openai.gpt-5.5", []),
+            tools=[lookup],
+            max_cost_usd=1.0,
+            reflexion=False,
+            grounding=False,
+        )
+    assert "model_id='oci:openai.gpt-5.5'" in str(info.value)
+
+
+def test_a_registered_oci_rate_prices_the_run_and_holds_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from locus.models import metadata as module
+
+    monkeypatch.setattr(module, "_registry", dict(module._registry))
+    register_metadata(
+        ModelMetadata(
+            model_id="oci:openai.gpt-5.5",
+            family="openai",
+            context_length=400_000,
+            max_output_tokens=128_000,
+            input_price_per_mtok="10.00",
+            output_price_per_mtok="30.00",
+        )
+    )
+    calls: list[int] = []
+    agent = Agent(
+        model=_looping_model("oci:openai.gpt-5.5", calls),
+        tools=[lookup],
+        max_cost_usd=0.20,
+        max_tokens=4_000,
+        max_iterations=50,
+        reflexion=False,
+        grounding=False,
+    )
+
+    result = agent.run_sync("look everything up")
+
+    # Same arithmetic as the priced model above: $0.04 a call, a third call
+    # could reach the budget, so two are made at the registered OCI rate.
+    assert result.stop_reason == "cost_budget"
+    assert len(calls) == 2
+    assert result.metrics.cost_usd == pytest.approx(0.08)
+
+
 def test_cost_budget_is_a_stop_reason() -> None:
     assert _normalize_stop_reason("cost_budget") == "cost_budget"
 

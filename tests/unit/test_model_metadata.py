@@ -529,6 +529,53 @@ class TestOCIModelIds:
         assert metadata_for("oci:openai.gpt-9") is None
         assert metadata_for("openai.") is None
 
+    def test_an_oci_id_is_unpriced_until_a_rate_is_registered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from locus.models import metadata as module
+
+        monkeypatch.setattr(module, "_registry", dict(module._registry))
+        direct = metadata_for("gpt-5.5")
+        through_oci = metadata_for("oci:openai.gpt-5.5")
+        assert direct is not None
+        assert through_oci is not None
+        assert direct.input_price_per_mtok == Decimal("1.25")
+        # The window and cap are the served model's; the price is not OCI's, so none.
+        assert through_oci.context_length == direct.context_length
+        assert through_oci.max_output_tokens == direct.max_output_tokens
+        assert through_oci.input_price_per_mtok is None
+        assert through_oci.output_price_per_mtok is None
+        register_metadata(
+            ModelMetadata(
+                model_id="oci:openai.gpt-5.5",
+                family="openai",
+                context_length=400_000,
+                max_output_tokens=128_000,
+                input_price_per_mtok="3.00",
+                output_price_per_mtok="12.00",
+            )
+        )
+        priced = metadata_for("oci:openai.gpt-5.5")
+        assert priced is not None
+        assert priced.input_price_per_mtok == Decimal("3.00")
+        assert priced.output_price_per_mtok == Decimal("12.00")
+
+    @pytest.mark.parametrize(
+        ("model_id", "slug"),
+        [
+            ("oci:openai.gpt-5.5", "gpt-5.5"),
+            ("openai.gpt-5.5", "gpt-5.5"),
+            (" oci-responses:meta.llama-3.3-70b-instruct ", "llama-3.3-70b-instruct"),
+            ("openai:gpt-5.5", None),
+            ("gpt-5.5", None),
+            ("somevendor.gpt-4.1", None),
+        ],
+    )
+    def test_oci_served_slug(self, model_id: str, slug: str | None) -> None:
+        from locus.models.metadata import oci_served_slug
+
+        assert oci_served_slug(model_id) == slug
+
     def test_the_oci_hosted_entries_carry_no_price(self) -> None:
         md = metadata_for("oci:meta.llama-3.3-70b-instruct")
         assert md is not None
