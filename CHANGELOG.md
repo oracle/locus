@@ -8,6 +8,19 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A run abandoned during a tool call is finalized without errors.** A host
+  whose event loop has no async-generator hooks, such as a Temporal workflow
+  evicted from its worker, can drop a run while it awaits a tool. The garbage
+  collector then finalized the run's generators with no loop to await on, and
+  Python reported "async generator ignored GeneratorExit" from
+  `ConcurrentExecutor.execute_streaming` and "asynchronous generator is
+  already running" from `Agent.run`. The executor now cancels its tasks and
+  waits for them only on the loop that owns them, and `Agent.run` does not
+  try to close a run that is still awaiting. Closing a stream on its own loop
+  waits for the cancelled tasks as before.
+
 ## [6.7.0] - 2026-11-25
 
 ### Changed

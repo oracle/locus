@@ -320,12 +320,13 @@ def _bus_bridge(
         # that cannot be forgotten when a 21st is added.
         agent_name = _agent_label(args[0] if args else None)
 
-        # ``aclosing``: when the consumer closes this generator (``aclose()``,
-        # ``break`` inside ``contextlib.aclosing``), the run it drives is
-        # closed right here — its ``finally`` (run bookkeeping, the final
-        # checkpoint) runs before ``aclose()`` returns instead of whenever
-        # the garbage collector finalizes the orphaned inner generator.
-        async with contextlib.aclosing(fn(*args, **kwargs)) as inner:
+        # Close the run this generator drives when the consumer closes it
+        # (``aclose()``, ``break`` inside ``contextlib.aclosing``): the run's
+        # ``finally`` (run bookkeeping, the final checkpoint) then runs before
+        # ``aclose()`` returns instead of whenever the garbage collector
+        # finalizes the orphaned inner generator.
+        inner = fn(*args, **kwargs)
+        try:
             async for raw in inner:
                 # Only stamp what is unattributed. A nested agent's events
                 # arrive already labelled, and relabelling them with the
@@ -341,6 +342,14 @@ def _bus_bridge(
                 except Exception:  # noqa: BLE001 — telemetry never breaks the loop
                     pass
                 yield event
+        finally:
+            # A run that is still awaiting cannot be closed from here: this
+            # generator was finalized while suspended inside it (a host
+            # abandoned the run mid-call, as a Temporal workflow evicted
+            # during a tool call does), and ``aclose()`` would raise
+            # "asynchronous generator is already running".
+            if not getattr(inner, "ag_running", False):
+                await inner.aclose()
 
     return wrapper
 
