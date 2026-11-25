@@ -50,32 +50,19 @@ What this notebook covers:
   `create_deepagent` composes.
 - For Part 5 only: `OPENAI_API_KEY` for embeddings.
 
-The `locus.deepagent` package also ships the research pattern as an
-explicit graph, `create_research_workflow`, and the drawing shows that
-shape. Execute is the agent tool loop that gathers evidence, Causal
-inference builds a causal chain from it, Summarize distills the evidence
-into a summary, and Grounding eval scores the summary's claims against the
-evidence with the same `GroundingEvaluator` class that `create_deepagent`
-configures when `grounding=True`. Below the threshold the summary is
-regenerated without re-running tools while regenerations are left, then
-replanned with a prompt focused on the ungrounded claims, and the run ends
-once the score clears the threshold or both budgets are used up:
+The `locus.deepagent` package also ships the research pattern as an explicit graph, `create_research_workflow`, and the drawing shows that shape. Execute is the agent tool loop that gathers evidence, Causal inference builds a causal chain from it, Summarize distills the evidence into a summary, and Grounding eval scores the summary's claims against the evidence with the same `GroundingEvaluator` class that `create_deepagent` configures when `grounding=True`.
+
+Below the threshold the summary is regenerated without re-running tools while regenerations are left, then replanned with a prompt focused on the ungrounded claims, and the run ends once the score clears the threshold or both budgets are used up:
 
 {{ locus_diagram deepagent-workflow }}
 
 ## Key lines
 
-`part1_basic` is the whole pattern: `create_deepagent` takes the inventory
-tools and the typed `submit_review` tool, enforces `ServiceReport` as the
-output schema, and keeps reflexion and grounding on. The run ends once
-`submit_review` has returned without error and the agent's confidence — the
-figure the reflexion pass maintains on the agent state, not the `confidence`
-field inside the report — has reached `min_confidence`, with
-`max_iterations` as the backstop. An output schema also switches the loop to
-explicit completion, in which the grounding check — run only before a final
-answer that calls no tool — is never reached, so the exit rests on the
-submit tool and the confidence gate. `arun` runs the loop and
-`result.parsed` is the final answer coerced into `ServiceReport`:
+`part1_basic` is the whole pattern: `create_deepagent` takes the inventory tools and the typed `submit_review` tool, enforces `ServiceReport` as the output schema, and keeps reflexion and grounding on.
+
+The run ends once `submit_review` has returned without error and the agent's confidence — the figure the reflexion pass maintains on the agent state, not the `confidence` field inside the report — has reached `min_confidence`, with `max_iterations` as the backstop.
+
+An output schema also switches the loop to explicit completion, in which the grounding check — run only before a final answer that calls no tool — is never reached, so the exit rests on the submit tool and the confidence gate. `arun` runs the loop and `result.parsed` is the final answer coerced into `ServiceReport`:
 
 {{ locus_source examples/notebook_31_deepagent.py::part1_basic }}
 

@@ -94,31 +94,17 @@ with its ingest-planning system prompt and `max_iterations=4`, is in
 python examples/notebook_40_oracle_indb_chunker.py
 ```
 
-The script needs an Oracle Database 26ai reachable through the four
-variables in Prerequisites — `ORACLE_DSN`, `ORACLE_USER`,
-`ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS or
-`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias;
-`ORACLE_WALLET_PASSWORD` is
-optional and matters only for an encrypted wallet — and `EXECUTE` on
-`DBMS_VECTOR_CHAIN` for that user. When any of them is unset it
-prints a skip notice naming the missing variables, together with the
-minimal wiring, and exits cleanly with status 0 before opening a
-connection. With them set it creates a one-row demo table,
-`locus_notebook_40_docs`, in that schema, runs the two prompts and drops
-the table on exit.
+The script needs an Oracle Database 26ai reachable through the four variables in Prerequisites — `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias; `ORACLE_WALLET_PASSWORD` is optional and matters only for an encrypted wallet — and `EXECUTE` on `DBMS_VECTOR_CHAIN` for that user.
 
-Model choice for the agent comes from `examples/config.py`: OCI
-Generative AI when `~/.oci/config` has a usable profile, otherwise the
-bundled mock model. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`,
-`anthropic` or `mock`) to force one. Under the mock model each prompt
-still issues one synthesised tool call, so `UTL_TO_CHUNKS` does run in
-the database; but neither tool's name appears as a word in either
-prompt, so the mock's selection falls back to the first bound tool and
-both prompts call `chunk_paragraph`, with the prompt's last capitalised
-word as the passage. `chunk_table_rows` is reached only by a live
-model, the agent's final message is the mock's placeholder text rather
-than a reading of the returned statistics, and the closing paragraph
-the script prints is fixed text written for a live run.
+When any of them is unset it prints a skip notice naming the missing variables, together with the minimal wiring, and exits cleanly with status 0 before opening a connection.
+
+With them set it creates a one-row demo table, `locus_notebook_40_docs`, in that schema, runs the two prompts and drops the table on exit.
+
+Model choice for the agent comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile, otherwise the bundled mock model. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to force one.
+
+Under the mock model each prompt still issues one synthesised tool call, so `UTL_TO_CHUNKS` does run in the database; but neither tool's name appears as a word in either prompt, so the mock's selection falls back to the first bound tool and both prompts call `chunk_paragraph`, with the prompt's last capitalised word as the passage.
+
+`chunk_table_rows` is reached only by a live model, the agent's final message is the mock's placeholder text rather than a reading of the returned statistics, and the closing paragraph the script prints is fixed text written for a live run.
 
 ## See also
 

@@ -39,46 +39,31 @@ What this notebook covers:
 
 ## Key lines
 
-The router is assembled in one place: a `CapabilityIndex` over the three
-annotated tools, the eight built-in protocols, a `PolicyGate` with its
-default thresholds (`require_approval_above=Risk.MEDIUM`, so a HIGH-risk
-frame needs approval; `max_risk=Risk.HIGH`, the top of the `Risk` scale,
-so the gate's own ceiling denies nothing), a `CognitiveCompiler` that
-keeps the default approval callback, and an `Agent` extractor whose
-`output_schema` is `GoalFrame`, so the model fills a typed frame and never
-chooses the topology. With no `protocol_picker` configured, the compiler
-ranks the candidates that pass the filter by rule: the protocol that
-lists the goal in `primary_for` wins when its cost is within one step of
-the frame's complexity, then the closest cost-to-complexity fit, then
-lower cost, then fewer `handles`. A frame whose risk is above every
-eligible protocol's cap is not an error: it compiles onto
-`approval_gated_execution` and is held for approval:
+The router is assembled in one place:
+
+- A `CapabilityIndex` over the three annotated tools.
+- The eight built-in protocols.
+- A `PolicyGate` with its default thresholds (`require_approval_above=Risk.MEDIUM`, so a HIGH-risk frame needs approval; `max_risk=Risk.HIGH`, the top of the `Risk` scale, so the gate's own ceiling denies nothing).
+- A `CognitiveCompiler` that keeps the default approval callback.
+- An `Agent` extractor whose `output_schema` is `GoalFrame`, so the model fills a typed frame and never chooses the topology.
+
+With no `protocol_picker` configured, the compiler ranks the candidates that pass the filter by rule: the protocol that lists the goal in `primary_for` wins when its cost is within one step of the frame's complexity, then the closest cost-to-complexity fit, then lower cost, then fewer `handles`.
+
+A frame whose risk is above every eligible protocol's cap is not an error: it compiles onto `approval_gated_execution` and is held for approval:
 
 {{ locus_source examples/notebook_29_cognitive_router.py::build_router }}
 
-The extractor is one `RequestClassifier`, the seam the frame comes
-through. `Router(extractor=...)` wraps the agent in `AgentFrameExtractor`,
-which runs its structured-output call off the event loop and raises
-`FrameExtractionError` when the result is not a `GoalFrame`;
-`Router(classifier=...)` takes anything with
-`async classify(text) -> GoalFrame` (a trained classifier, a lookup over a
-closed set of requests, a cache in front of the agent), and the compiler,
-the policy gate and the event stream see the same frame either way. The
-last-mile tie-break has the same shape: `CognitiveCompiler(protocol_picker=...)`
-takes any `ProtocolPicker`, of which `LLMProtocolPicker` is the one that
-ships.
+The extractor is one `RequestClassifier`, the seam the frame comes through. `Router(extractor=...)` wraps the agent in `AgentFrameExtractor`, which runs its structured-output call off the event loop and raises `FrameExtractionError` when the result is not a `GoalFrame`.
 
-One rule runs before the three gates. A frame at `Complexity.LOW` whose
-risk is within `direct_response`'s `risk_max` compiles to `direct_response`
-whatever its `primary_goal`: one step of work is one reply, whichever verb
-the extractor framed it with, and `router.protocol.selected` reports
-`method="low_complexity_direct"`. The `PolicyGate` still runs, so a frame
-with `approval_required=True` is still held, and a deployment that lists
-`direct_response` in `denied_protocols` sends LOW frames down the ordinary
-filter-and-rank path instead; `CognitiveCompiler(low_complexity_direct=None)`
-switches the rule off. `explain()` mirrors it: the direct protocol is the
-only candidate, and a protocol that would have passed the three gates is
-reported as rejected at the `complexity` gate.
+`Router(classifier=...)` takes anything with `async classify(text) -> GoalFrame` (a trained classifier, a lookup over a closed set of requests, a cache in front of the agent), and the compiler, the policy gate and the event stream see the same frame either way.
+
+The last-mile tie-break has the same shape: `CognitiveCompiler(protocol_picker=...)` takes any `ProtocolPicker`, of which `LLMProtocolPicker` is the one that ships.
+
+One rule runs before the three gates. A frame at `Complexity.LOW` whose risk is within `direct_response`'s `risk_max` compiles to `direct_response` whatever its `primary_goal`: one step of work is one reply, whichever verb the extractor framed it with, and `router.protocol.selected` reports `method="low_complexity_direct"`.
+
+The `PolicyGate` still runs, so a frame with `approval_required=True` is still held, and a deployment that lists `direct_response` in `denied_protocols` sends LOW frames down the ordinary filter-and-rank path instead; `CognitiveCompiler(low_complexity_direct=None)` switches the rule off.
+
+`explain()` mirrors it: the direct protocol is the only candidate, and a protocol that would have passed the three gates is reported as rejected at the `complexity` gate.
 
 The compiler's skill catalogue comes from the SKILL.md packages under
 `examples/skills/`. Each skill is registered under the `domain` its
@@ -91,21 +76,11 @@ result, global skills included, to each `Agent` it emits as a
 
 {{ locus_source examples/notebook_29_cognitive_router.py::_load_skills }}
 
-Each request goes through `Router.dispatch`, which runs the extractor,
-compiles the frame and executes the runnable. The mock model returns
-canned text rather than JSON, so `Router.extract` emits
-`router.frame.failed` and raises `FrameExtractionError`, and the
-hand-built fallback frame is compiled and executed directly instead;
-protocol selection, the policy gate and the compiled runtime still run
-end to end. Because this path calls `router.compiler.compile` without a
-run id, the `on_frame` callback and the selection, verdict, compile and
-execution events (`router.protocol.selected`, `router.policy.verdict`,
-`router.runnable.*`) appear only with a live provider. For the sixth
-request, `approval_gated_execution` is the only protocol that accepts a
-`REMEDIATE` goal at HIGH risk (`plan_execute_validate` caps at MEDIUM);
-the gate allows it with `require_approval=True`, the compiler wraps the
-runnable in an approval check, the default callback denies, and `execute`
-raises `PolicyDeniedError`, which `main` prints as the `[verdict]` line:
+Each request goes through `Router.dispatch`, which runs the extractor, compiles the frame and executes the runnable. The mock model returns canned text rather than JSON, so `Router.extract` emits `router.frame.failed` and raises `FrameExtractionError`, and the hand-built fallback frame is compiled and executed directly instead; protocol selection, the policy gate and the compiled runtime still run end to end.
+
+Because this path calls `router.compiler.compile` without a run id, the `on_frame` callback and the selection, verdict, compile and execution events (`router.protocol.selected`, `router.policy.verdict`, `router.runnable.*`) appear only with a live provider.
+
+For the sixth request, `approval_gated_execution` is the only protocol that accepts a `REMEDIATE` goal at HIGH risk (`plan_execute_validate` caps at MEDIUM). The gate allows it with `require_approval=True`, the compiler wraps the runnable in an approval check, the default callback denies, and `execute` raises `PolicyDeniedError`, which `main` prints as the `[verdict]` line:
 
 {{ locus_source examples/notebook_29_cognitive_router.py::_dispatch_with_fallback }}
 

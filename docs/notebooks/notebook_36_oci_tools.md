@@ -1,29 +1,18 @@
 # OCI tools
 
-The SDK ships two built-in tools that together expose every operation of
-the Oracle Cloud Infrastructure (OCI) Python SDK to an agent without a
-wrapper per service. `describe_oci(service?, client?, operation?)` is
-the reference: it narrows progressively through the installed SDK,
-listing the service modules, the clients in one service, the operations
-on one client and the parameter schema of one operation, parsed from the
-SDK docstring. `use_oci(service, client, operation, parameters, ...)` is
-the single execution path: it builds the requested
-`oci.<service>.<Client>` with the requested authentication, invokes the
-method and serialises the response, rendering snake_case Python
-attributes under their camelCase wire names through the SDK's
-`attribute_map`.
+The SDK ships two built-in tools that together expose every operation of the Oracle Cloud Infrastructure (OCI) Python SDK to an agent without a wrapper per service.
 
-Every call names a *service* (a snake_case submodule under `oci.*`, such
-as `identity`, `core` or `object_storage`), a *client* (a class in that
-module whose name ends in `Client`, such as `IdentityClient` or
-`ComputeClient`) and an *operation* (a snake_case method that mirrors
-the REST operation id, such as `list_compartments` or
-`get_autonomous_database`). The agent loop hands the model both tools:
-from natural-language intent the model picks the three names, calls
-`describe_oci` when it is unsure of the parameter shape, then calls
-`use_oci` to run it. One generic tool pair reaches Identity, Compute,
-Database, Object Storage, Networking, Vault, Functions, Bastion,
-Generative AI and every other service in the installed SDK.
+`describe_oci(service?, client?, operation?)` is the reference: it narrows progressively through the installed SDK, listing the service modules, the clients in one service, the operations on one client and the parameter schema of one operation, parsed from the SDK docstring.
+
+`use_oci(service, client, operation, parameters, ...)` is the single execution path: it builds the requested `oci.<service>.<Client>` with the requested authentication, invokes the method and serialises the response, rendering snake_case Python attributes under their camelCase wire names through the SDK's `attribute_map`.
+
+Every call names:
+
+- a *service* (a snake_case submodule under `oci.*`, such as `identity`, `core` or `object_storage`);
+- a *client* (a class in that module whose name ends in `Client`, such as `IdentityClient` or `ComputeClient`);
+- and an *operation* (a snake_case method that mirrors the REST operation id, such as `list_compartments` or `get_autonomous_database`).
+
+The agent loop hands the model both tools: from natural-language intent the model picks the three names, calls `describe_oci` when it is unsure of the parameter shape, then calls `use_oci` to run it. One generic tool pair reaches Identity, Compute, Database, Object Storage, Networking, Vault, Functions, Bastion, Generative AI and every other service in the installed SDK.
 
 `use_oci` is read-only by default. An operation whose name does not
 start with a read-only prefix (`list_`, `get_`, `head_`, `summarize_`,
@@ -120,15 +109,9 @@ read from `result.state.messages`, showing which `describe_oci` and
 python examples/notebook_36_oci_tools.py
 ```
 
-The script builds its model with `locus.models.get_model` on the
-`oci:openai.gpt-4o` id and does not use the shared `examples/config.py`
-harness, so there is no mock fallback and `LOCUS_MODEL_PROVIDER` is not
-read. Part 1 only introspects the installed OCI Python SDK and runs
-offline. Parts 2 and 3 read the variables from Prerequisites; the first
-one missing, after its fallbacks, makes the script write a skip notice
-to stderr and exit with status 77, which `scripts/run_notebooks.py`
-reports as a skip rather than a failure, so an offline run completes
-Part 1 and stops before the first network call.
+The script builds its model with `locus.models.get_model` on the `oci:openai.gpt-4o` id and does not use the shared `examples/config.py` harness, so there is no mock fallback and `LOCUS_MODEL_PROVIDER` is not read. Part 1 only introspects the installed OCI Python SDK and runs offline.
+
+Parts 2 and 3 read the variables from Prerequisites; the first one missing, after its fallbacks, makes the script write a skip notice to stderr and exit with status 77, which `scripts/run_notebooks.py` reports as a skip rather than a failure, so an offline run completes Part 1 and stops before the first network call.
 
 The `--part` flag runs one part on its own:
 

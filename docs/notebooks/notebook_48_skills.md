@@ -33,17 +33,13 @@ What this notebook covers:
 - The bundled `examples/skills/` directory (`code-review`,
   `incident-triage`, `ioc-enrichment`, `siem-query`) for Part 2 to load.
 
-The drawing follows a skill folder such as Part 3's `bin-enrichment` from
-disk through the three disclosure levels this notebook exercises: the
-catalog of names, descriptions and, for a skill loaded from disk,
-locations that every request carries (the four procedures Part 2 loads);
-the `SKILL.md` body that enters the conversation only when the agent
-calls the `skills` tool (the activation Parts 1 and 2 count); and the
-listing of `scripts/`, `references/` and `assets/` files that is named
-but not read. Of the `SKILL.md` keys the drawing lists, `compatibility`
-is an optional one that the plugin appends to the activation footer when
-set; `metadata`, which Part 3 prints, is parsed onto the `Skill` object
-but never sent to the model, so it has no row:
+The drawing follows a skill folder such as Part 3's `bin-enrichment` from disk through the three disclosure levels this notebook exercises:
+
+- the catalog of names, descriptions and, for a skill loaded from disk, locations that every request carries (the four procedures Part 2 loads);
+- the `SKILL.md` body that enters the conversation only when the agent calls the `skills` tool (the activation Parts 1 and 2 count);
+- and the listing of `scripts/`, `references/` and `assets/` files that is named but not read.
+
+Of the `SKILL.md` keys the drawing lists, `compatibility` is an optional one that the plugin appends to the activation footer when set; `metadata`, which Part 3 prints, is parsed onto the `Skill` object but never sent to the model, so it has no row:
 
 {{ locus_diagram skills-disclosure }}
 

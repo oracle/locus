@@ -1,14 +1,8 @@
 # Playbooks
 
-A playbook is a typed, ordered sequence of steps, each declaring the
-tools it expects. Bound to an agent, it holds the agent to that order:
-while a step is current, only the tools it expects may run (with the
-default `allow_extra_tools=False`), and the plan moves to the next step
-once they have all been called. That is what a General Data Protection
-Regulation (GDPR) data subject access request (DSAR) procedure, a
-right-to-erasure workflow, or any privacy procedure that must be
-auditable afterwards asks of an agent: no step skipped, every tool call
-attributable to a step.
+A playbook is a typed, ordered sequence of steps, each declaring the tools it expects. Bound to an agent, it holds the agent to that order: while a step is current, only the tools it expects may run (with the default `allow_extra_tools=False`), and the plan moves to the next step once they have all been called.
+
+That is what a General Data Protection Regulation (GDPR) data subject access request (DSAR) procedure, a right-to-erasure workflow, or any privacy procedure that must be auditable afterwards asks of an agent: no step skipped, every tool call attributable to a step.
 
 Parts 1–8 are plain Python over the playbook objects (Part 3 asks the
 model for one next-step suggestion from the plan's state); Part 9 binds
@@ -35,18 +29,12 @@ What this notebook covers:
   `LOCUS_MODEL_PROVIDER` set to `openai` or `anthropic` with the
   matching key, or `mock` for an offline run.
 
-Part 9 is where the enforcement drawn below happens. The triage
-playbook has three steps, `gather`, `classify` and `notify`, each
-expecting one tool. When the model proposes a tool call, the
-`PlaybookEnforcerHook` checks it against the plan's current step: an
-in-sequence call runs, is recorded in that step's `StepExecution`, and
-completes the step once its expected tools have all been seen; an
-out-of-sequence call is cancelled before the tool body runs, and the
-model reads the `PlaybookEnforcer blocked:` message, which names the
-current step's expected tools and hints, as the tool's result. The
-drawing labels the steps with the refund playbook from
-[the playbooks concept page](../concepts/playbooks.md); the path is the
-same:
+Part 9 is where the enforcement drawn below happens. The triage playbook has three steps, `gather`, `classify` and `notify`, each expecting one tool. When the model proposes a tool call, the `PlaybookEnforcerHook` checks it against the plan's current step:
+
+- an in-sequence call runs, is recorded in that step's `StepExecution`, and completes the step once its expected tools have all been seen;
+- an out-of-sequence call is cancelled before the tool body runs, and the model reads the `PlaybookEnforcer blocked:` message, which names the current step's expected tools and hints, as the tool's result.
+
+The drawing labels the steps with the refund playbook from [the playbooks concept page](../concepts/playbooks.md); the path is the same:
 
 {{ locus_diagram playbook-enforcement }}
 
@@ -57,15 +45,9 @@ whether it is required, and an optional `max_tool_calls` cap:
 
 {{ locus_source examples/notebook_49_playbooks.py::part1_steps }}
 
-The `Playbook` orders the steps; the enforcer walks them through the
-plan's current-step pointer, which advances once the current step's
-expected tools have all been called or its `max_tool_calls` is reached.
-`strict_sequence` and `max_iterations` are carried for authoring and
-serialisation and are not read by the enforcer. `allow_extra_tools=True`
-relaxes enforcement: a call goes through even when its tool is not in
-the current step's `expected_tools`, so it is not the setting for a
-compliance-grade procedure. This playbook is never bound to an agent
-here; the Part 9 triage playbook keeps the default:
+The `Playbook` orders the steps; the enforcer walks them through the plan's current-step pointer, which advances once the current step's expected tools have all been called or its `max_tool_calls` is reached. `strict_sequence` and `max_iterations` are carried for authoring and serialisation and are not read by the enforcer.
+
+`allow_extra_tools=True` relaxes enforcement: a call goes through even when its tool is not in the current step's `expected_tools`, so it is not the setting for a compliance-grade procedure. This playbook is never bound to an agent here; the Part 9 triage playbook keeps the default:
 
 {{ locus_source examples/notebook_49_playbooks.py::part2_playbook }}
 

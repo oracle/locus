@@ -104,31 +104,15 @@ session:
 
 {{ locus_source examples/notebook_44_oracle_agent_memory.py::_build_connection }}
 
-`schema_policy="create_if_necessary"` creates the missing schema objects
-on first run; a production deployment uses `"require_existing"`, which
-validates the existing schema and creates or modifies nothing, so the
-schema is provisioned out of band and the runtime user needs no
-privilege beyond using it. `thread_defaults` is forwarded to
-`create_thread` for every thread the manager creates, here running
-extraction after every appended message with a running context summary,
-so Alice's preference is extracted from session A's single turn
-(upstream deprecated these per-thread keywords in 26.6 in favour of
-`memory_extraction_config`; the pinned `<27` releases still accept
-them):
+`schema_policy="create_if_necessary"` creates the missing schema objects on first run; a production deployment uses `"require_existing"`, which validates the existing schema and creates or modifies nothing, so the schema is provisioned out of band and the runtime user needs no privilege beyond using it.
+
+`thread_defaults` is forwarded to `create_thread` for every thread the manager creates, here running extraction after every appended message with a running context summary, so Alice's preference is extracted from session A's single turn (upstream deprecated these per-thread keywords in 26.6 in favour of `memory_extraction_config`; the pinned `<27` releases still accept them):
 
 {{ locus_source examples/notebook_44_oracle_agent_memory.py::_build_manager }}
 
-A new agent on thread B, built by `_build_agent` (full source below) so
-that `memory_manager=manager` is its only link to session A, asks for
-Alice's preference although the thread has no prior messages. Before
-the model is called, `OracleAgentMemoryManager.on_session_start` has
-inserted a system message right after the user's turn holding thread
-B's context card from `OracleThread.get_context_card_async`, when it
-renders anything (recent messages and a summary of this thread, both
-empty for a new thread), and the records that
-`OracleAgentMemory.search_async` scoped to `user_id` returns from every
-thread; the second part is how the preference extracted on thread A
-reaches the model:
+A new agent on thread B, built by `_build_agent` (full source below) so that `memory_manager=manager` is its only link to session A, asks for Alice's preference although the thread has no prior messages.
+
+Before the model is called, `OracleAgentMemoryManager.on_session_start` has inserted a system message right after the user's turn holding thread B's context card from `OracleThread.get_context_card_async`, when it renders anything (recent messages and a summary of this thread, both empty for a new thread), and the records that `OracleAgentMemory.search_async` scoped to `user_id` returns from every thread; the second part is how the preference extracted on thread A reaches the model:
 
 {{ locus_source examples/notebook_44_oracle_agent_memory.py::session_b }}
 
@@ -138,25 +122,13 @@ reaches the model:
 python examples/notebook_44_oracle_agent_memory.py
 ```
 
-The script needs an Autonomous Database reachable through the variables in Prerequisites:
-`ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for
-mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or
-`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias,
-plus the `oracleagentmemory` extra. When any of them is unset it prints the
-missing names and the
-minimal wiring snippet, then exits cleanly without opening a
-connection; when the package is not installed, the manager raises an
-`ImportError` that names the extras command. With the database in
-place, the embedder and the memory extractor run through litellm
-against OCI Generative AI by default, authenticated from the OCI
-profile named by `OCI_SESSION_PROFILE`, `OCI_PROFILE` or
-`OCI_CLI_PROFILE`, in that order (`DEFAULT` otherwise), with
-`OCI_REGION` (the profile's region otherwise) and `OCI_COMPARTMENT_ID`;
-`LOCUS_OAM_EMBEDDER` and `LOCUS_OAM_LLM` switch them to another litellm
-spec. The agent's own model comes from `examples/config.py`: OCI
-Generative AI when `~/.oci/config` has a usable profile, otherwise the
-bundled mock model; set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`,
-`anthropic` or `mock`) to force one.
+The script needs an Autonomous Database reachable through the variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias, plus the `oracleagentmemory` extra.
+
+When any of them is unset it prints the missing names and the minimal wiring snippet, then exits cleanly without opening a connection. When the package is not installed, the manager raises an `ImportError` that names the extras command.
+
+With the database in place, the embedder and the memory extractor run through litellm against OCI Generative AI by default, authenticated from the OCI profile named by `OCI_SESSION_PROFILE`, `OCI_PROFILE` or `OCI_CLI_PROFILE`, in that order (`DEFAULT` otherwise), with `OCI_REGION` (the profile's region otherwise) and `OCI_COMPARTMENT_ID`; `LOCUS_OAM_EMBEDDER` and `LOCUS_OAM_LLM` switch them to another litellm spec.
+
+The agent's own model comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile, otherwise the bundled mock model. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 ## See also
 

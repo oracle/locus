@@ -22,23 +22,16 @@ What this notebook covers:
 - `graph.config.interrupt_before = [...]` — pause before specific nodes
   without modifying them.
 
-The drawing has two bands; every part of this notebook takes the graph
-path in the upper one, and Part 1 is the simplest case. The `approval`
-node calls `interrupt(payload)`, the call unwinds to the graph as an
-`InterruptException`, and `execute()` returns a `GraphResult` whose
-`interrupt` field carries the paused node and the question payload.
-The caller shows the question, waits for the release manager, and
-resumes with `Command(update=result.final_state, resume="yes")`, which
-runs the `approval` node again from the top; this time `interrupt()`
-returns the answer instead of pausing. Two notes in the drawing apply
-throughout: these graphs have no checkpointer, so the returned
-`final_state` travels back inside the `Command` rather than through the
-dashed checkpointer lane, and every node is `async def`, because a
-plain `def` body runs in a worker thread that never sees the resume
-value. The lower band is the agent-side counterpart — an `ask_user`
-question or a held gated tool call, surfaced as an `InterruptEvent` and
-released with `agent.resume()` — which this notebook does not exercise;
-the [Interrupts](../concepts/interrupts.md) concept page covers it:
+The drawing has two bands; every part of this notebook takes the graph path in the upper one, and Part 1 is the simplest case. The `approval` node calls `interrupt(payload)`, the call unwinds to the graph as an `InterruptException`, and `execute()` returns a `GraphResult` whose `interrupt` field carries the paused node and the question payload.
+
+The caller shows the question, waits for the release manager, and resumes with `Command(update=result.final_state, resume="yes")`, which runs the `approval` node again from the top; this time `interrupt()` returns the answer instead of pausing.
+
+Two notes in the drawing apply throughout:
+
+- These graphs have no checkpointer, so the returned `final_state` travels back inside the `Command` rather than through the dashed checkpointer lane.
+- Every node is `async def`, because a plain `def` body runs in a worker thread that never sees the resume value.
+
+The lower band is the agent-side counterpart — an `ask_user` question or a held gated tool call, surfaced as an `InterruptEvent` and released with `agent.resume()` — which this notebook does not exercise; the [Interrupts](../concepts/interrupts.md) concept page covers it:
 
 {{ locus_diagram interrupt-resume }}
 

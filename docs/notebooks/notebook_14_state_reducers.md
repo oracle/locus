@@ -18,17 +18,11 @@ What this notebook covers:
 - Two nodes that each call a large language model (LLM) and append to
   the same case log.
 
-The drawing shows a `StateGraph` with a review loop: `START` hands the
-input state to `plan`, and fixed edges carry it through `investigate`
-and `report` to `review`; after `review` a conditional edge reads the
-merged state to loop back or finish. That merge is the step this
-notebook is about. Each time a node returns, its output is merged into
-the state through the schema's reducers before the next node or the
-router reads it, which is how the router sees what `review` just wrote.
-The payment-check chains here — `fraud`, then `avs`, then `threeds` —
-are straight lines of fixed edges, so the only thing that changes
-between Part 1, the same chain with no reducer, and Part 1b is how that
-merge treats the `signals` field:
+The drawing shows a `StateGraph` with a review loop: `START` hands the input state to `plan`, and fixed edges carry it through `investigate` and `report` to `review`; after `review` a conditional edge reads the merged state to loop back or finish.
+
+That merge is the step this notebook is about. Each time a node returns, its output is merged into the state through the schema's reducers before the next node or the router reads it, which is how the router sees what `review` just wrote.
+
+The payment-check chains here — `fraud`, then `avs`, then `threeds` — are straight lines of fixed edges, so the only thing that changes between Part 1, the same chain with no reducer, and Part 1b is how that merge treats the `signals` field:
 
 {{ locus_diagram graph }}
 

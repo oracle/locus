@@ -35,17 +35,13 @@ What this notebook covers:
 - [Human in the loop](notebook_15_human_in_the_loop.md), the same gate in a
   graph without agents.
 
-All three patterns take the pause-and-resume path drawn in the upper band: an
-`async def` node calls `interrupt(payload)`, the `InterruptException` unwinds
-to the graph, and `execute()` returns a `GraphResult` whose `interrupt` field
-holds the paused node and the question for the approver. The caller answers
-with `Command(resume=...)`; the paused node runs again from the top, and this
-time `interrupt()` returns the answer instead of raising. The graphs in this
-notebook have no [checkpointer](../concepts/checkpointers.md), so the
-returned `final_state` travels back inside the `Command`; the dashed path
-through the checkpointer is the multi-process variant Pattern C points to.
-The lower band is the agent-side counterpart, which this notebook does not
-use; the [Interrupts](../concepts/interrupts.md) concept page covers it:
+All three patterns take the pause-and-resume path drawn in the upper band: an `async def` node calls `interrupt(payload)`, the `InterruptException` unwinds to the graph, and `execute()` returns a `GraphResult` whose `interrupt` field holds the paused node and the question for the approver.
+
+The caller answers with `Command(resume=...)`; the paused node runs again from the top, and this time `interrupt()` returns the answer instead of raising.
+
+The graphs in this notebook have no [checkpointer](../concepts/checkpointers.md), so the returned `final_state` travels back inside the `Command`; the dashed path through the checkpointer is the multi-process variant Pattern C points to.
+
+The lower band is the agent-side counterpart, which this notebook does not use; the [Interrupts](../concepts/interrupts.md) concept page covers it:
 
 {{ locus_diagram interrupt-resume }}
 
@@ -66,14 +62,9 @@ downstream route reads:
 
 {{ locus_source examples/notebook_27_multiagent_human_in_loop.py::smart_triage_node }}
 
-`demo_pattern_c` is the long pause of Pattern C: the `final_state` returned
-at the pause is the snapshot to hold, and the second `execute` call passes it
-back inside `Command(resume=...)` with the model re-attached, the same shape
-a multi-process resume keeps once the snapshot is loaded from a store you
-manage. With `GraphConfig(checkpointer=..., thread_id=...)` the graph saves
-the snapshot at the pause and reloads it on resume, ignoring the `update`
-passed with the `Command`, so a state that carries a live model object under
-`__model__`, as this one does, is held by the caller instead:
+`demo_pattern_c` is the long pause of Pattern C: the `final_state` returned at the pause is the snapshot to hold, and the second `execute` call passes it back inside `Command(resume=...)` with the model re-attached, the same shape a multi-process resume keeps once the snapshot is loaded from a store you manage.
+
+With `GraphConfig(checkpointer=..., thread_id=...)` the graph saves the snapshot at the pause and reloads it on resume, ignoring the `update` passed with the `Command`, so a state that carries a live model object under `__model__`, as this one does, is held by the caller instead:
 
 {{ locus_source examples/notebook_27_multiagent_human_in_loop.py::demo_pattern_c }}
 

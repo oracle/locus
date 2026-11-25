@@ -1,16 +1,10 @@
 # Advanced Graphs
 
-Per-node retry and caching, plus graph diagrams and live streaming. The
-scenario is a cloud-provisioning workflow for a small web tier — a
-`launch` step, an `attach` step and a `healthcheck` step — in which a
-control-plane call is sometimes throttled. `StateGraph.add_node` accepts
-a policy for one node at a time, so the throttled instance-launch call
-retries with backoff while the rest of the graph is unchanged, and a
-repeated machine-image lookup is served from a cache without changing
-how the node is called. The diagram helpers render the graph as text,
-the streaming hooks report a node's progress while it runs, and the last
-part puts a `RetryPolicy` on a node that calls a model, because the
-policy applies to any node regardless of what it does.
+Per-node retry and caching, plus graph diagrams and live streaming. The scenario is a cloud-provisioning workflow for a small web tier — a `launch` step, an `attach` step and a `healthcheck` step — in which a control-plane call is sometimes throttled.
+
+`StateGraph.add_node` accepts a policy for one node at a time, so the throttled instance-launch call retries with backoff while the rest of the graph is unchanged, and a repeated machine-image lookup is served from a cache without changing how the node is called.
+
+The diagram helpers render the graph as text, the streaming hooks report a node's progress while it runs, and the last part puts a `RetryPolicy` on a node that calls a model, because the policy applies to any node regardless of what it does.
 
 What this notebook covers:
 
@@ -22,17 +16,11 @@ What this notebook covers:
 - `graph.stream(...)` + `emit_custom` — push progress events from inside
   a node.
 
-The Part 3 provisioning graph is built from two kinds of edge: `add_edge`
-fixes the path from START to `launch`, from `launch` to `attach` and from
-`healthcheck` to END, and `add_conditional_edges` after `attach` lets a
-router send the run to `healthcheck` or directly to END. The two policies
-leave those edges unchanged: in Parts 1 and 2 each is passed to
-`add_node` on a one-node graph of its own. The drawing shows the same two
-edge kinds on a `StateGraph` with a review loop — the solid edges are
-fixed with `add_edge`, and the dashed edges after `review` are chosen by
-a router through `add_conditional_edges` that loops back to
-`investigate` while the confidence written by `review` is below 0.85 and
-reaches END once it is 0.85 or higher:
+The Part 3 provisioning graph is built from two kinds of edge: `add_edge` fixes the path from START to `launch`, from `launch` to `attach` and from `healthcheck` to END, and `add_conditional_edges` after `attach` lets a router send the run to `healthcheck` or directly to END.
+
+The two policies leave those edges unchanged: in Parts 1 and 2 each is passed to `add_node` on a one-node graph of its own.
+
+The drawing shows the same two edge kinds on a `StateGraph` with a review loop — the solid edges are fixed with `add_edge`, and the dashed edges after `review` are chosen by a router through `add_conditional_edges` that loops back to `investigate` while the confidence written by `review` is below 0.85 and reaches END once it is 0.85 or higher:
 
 {{ locus_diagram graph }}
 

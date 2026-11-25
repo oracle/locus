@@ -91,17 +91,9 @@ turn 1 although this process never saw it:
 python examples/notebook_42_oracle_26ai_checkpointer.py
 ```
 
-The script needs an Oracle Database reachable through the variables in Prerequisites:
-`ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for
-mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or
-`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias.
-When any of them is unset it prints
-the missing names and the minimal wiring, then exits cleanly without
-opening a connection. With the database in place, the agent's model
-comes from `examples/config.py`: OCI Generative AI when `~/.oci/config`
-has a usable profile, otherwise the bundled mock model. Set
-`LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to
-force one.
+The script needs an Oracle Database reachable through the variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias. When any of them is unset it prints the missing names and the minimal wiring, then exits cleanly without opening a connection.
+
+With the database in place, the agent's model comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile, otherwise the bundled mock model. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 ## See also
 

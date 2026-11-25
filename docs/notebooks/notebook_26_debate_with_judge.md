@@ -70,18 +70,11 @@ loop is accepted without `GraphConfig(allow_cycles=True)`:
 python examples/notebook_26_debate_with_judge.py
 ```
 
-The judge needs a live model that can produce JSON. Model choice comes
-from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a
-usable profile; otherwise set `LOCUS_MODEL_PROVIDER` to `openai` or
-`anthropic` with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the
-environment, or to any other registry provider together with
-`LOCUS_MODEL_ID` and its own credentials. There is no offline run: under
-the bundled mock model, `check_structured_output_capable()` prints a
-notice with example provider settings and exits cleanly (status 0)
-before the graph is built. When a live model returns no parsable
-`Verdict`, `judge_turn` raises `RuntimeError` naming a model with
-constrained decoding to use instead; the graph records the judge node as
-failed, and the driver reports it and exits with an error.
+The judge needs a live model that can produce JSON. Model choice comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile; otherwise set `LOCUS_MODEL_PROVIDER` to `openai` or `anthropic` with `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the environment, or to any other registry provider together with `LOCUS_MODEL_ID` and its own credentials.
+
+There is no offline run: under the bundled mock model, `check_structured_output_capable()` prints a notice with example provider settings and exits cleanly (status 0) before the graph is built.
+
+When a live model returns no parsable `Verdict`, `judge_turn` raises `RuntimeError` naming a model with constrained decoding to use instead; the graph records the judge node as failed, and the driver reports it and exits with an error.
 
 To force a provider and model:
 

@@ -18,22 +18,11 @@ The class default, `store="auto"`, starts in the second mode and drops
 to the first for the rest of the model's lifetime when the endpoint
 reports a ZDR tenancy, with one warning.
 
-The model reports its mode as `server_stateful`, and the runtime loop
-reads that flag. With `store=True` the loop sends only the messages
-added since the last assistant turn and skips the steps that shape a
-request from client-side history — `ConversationManager`, message-pair
-validation and the observation pack — because the history they work on
-is held by OCI; it also calls `complete()` rather than `stream()`, so an
-agent reply arrives whole rather than token by token. With `store=False`
-the loop takes the same client-side path as with
-`OCIChatCompletionsModel`, streaming included.
-Memory, Reflexion, [GSAR](../concepts/gsar.md) (typed grounding),
-grounding, hooks, idempotency, checkpointing and termination conditions
-do not depend on the transport. An `output_schema` travels in the
-system prompt and the reply is parsed afterwards, because
-`OCIResponsesModel` does not advertise native structured output. See
-the [OCI Responses concept page](../concepts/oci-responses.md) for the
-per-primitive table.
+The model reports its mode as `server_stateful`, and the runtime loop reads that flag. With `store=True` the loop sends only the messages added since the last assistant turn and skips the steps that shape a request from client-side history — `ConversationManager`, message-pair validation and the observation pack — because the history they work on is held by OCI.
+
+It also calls `complete()` rather than `stream()`, so an agent reply arrives whole rather than token by token. With `store=False` the loop takes the same client-side path as with `OCIChatCompletionsModel`, streaming included.
+
+Memory, Reflexion, [GSAR](../concepts/gsar.md) (typed grounding), grounding, hooks, idempotency, checkpointing and termination conditions do not depend on the transport. An `output_schema` travels in the system prompt and the reply is parsed afterwards, because `OCIResponsesModel` does not advertise native structured output. See the [OCI Responses concept page](../concepts/oci-responses.md) for the per-primitive table.
 
 What this notebook covers:
 
@@ -87,20 +76,15 @@ model:
 python examples/notebook_34_oci_responses.py
 ```
 
-The script calls OCI Generative AI directly and does not use the shared
-`examples/config.py` harness, so there is no mock fallback. It reads the
-variables from Prerequisites: `OCI_PROFILE` names a profile in
-`~/.oci/config` with Generative AI access and is the only one the script
-requires; `OCI_REGION` defaults to `us-chicago-1`; `OCI_COMPARTMENT` is a
-compartment with Generative AI access and, when it is unset,
-`OCIResponsesModel` falls back to `OCI_COMPARTMENT_ID` and then to the
-profile's tenancy OCID. Without `OCI_PROFILE` the script prints its
-banner and the Part 1 heading, writes a skip notice to stderr and exits
-with status 77, which `scripts/run_notebooks.py` reports as a skip
-rather than a failure; it exits the same way when the Responses endpoint
-is not served in the chosen region and the first call answers 404. Part 2
-runs only when `OCI_RESPONSES_STORE=1`; otherwise it prints a skip line
-and the remaining parts continue.
+The script calls OCI Generative AI directly and does not use the shared `examples/config.py` harness, so there is no mock fallback. It reads the variables from Prerequisites:
+
+- `OCI_PROFILE` names a profile in `~/.oci/config` with Generative AI access and is the only one the script requires.
+- `OCI_REGION` defaults to `us-chicago-1`.
+- `OCI_COMPARTMENT` is a compartment with Generative AI access and, when it is unset, `OCIResponsesModel` falls back to `OCI_COMPARTMENT_ID` and then to the profile's tenancy OCID.
+
+Without `OCI_PROFILE` the script prints its banner and the Part 1 heading, writes a skip notice to stderr and exits with status 77, which `scripts/run_notebooks.py` reports as a skip rather than a failure; it exits the same way when the Responses endpoint is not served in the chosen region and the first call answers 404.
+
+Part 2 runs only when `OCI_RESPONSES_STORE=1`; otherwise it prints a skip line and the remaining parts continue.
 
 To also exercise `store=True` in a tenancy without Zero Data Retention:
 

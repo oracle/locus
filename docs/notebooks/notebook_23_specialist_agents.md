@@ -64,16 +64,11 @@ to the system prompt when `select_playbook` picks this playbook for the task:
 
 {{ locus_source examples/notebook_23_specialist_agents.py::example_playbooks }}
 
-The call that runs it: `execute` takes the task and a `context` dictionary
-(formatted as a user message ahead of the task), selects a playbook itself,
-makes one model call with the tool schemas (a tool call the model returns is
-recorded on the state, not run), and returns a `SpecialistResult` whose
-`confidence` comes from the built-in estimator — a 0.5 baseline moved by 0.1
-for each hedging or certainty marker found in the reply, a rough proxy to
-replace with a domain scorer in production — alongside `success`,
-`duration_ms`, `output` and any `error`; the comparison against
-`confidence_threshold` is the example's own print, since the SDK records the
-threshold on the state but does not gate on it:
+The call that runs it: `execute` takes the task and a `context` dictionary (formatted as a user message ahead of the task), selects a playbook itself, makes one model call with the tool schemas (a tool call the model returns is recorded on the state, not run), and returns a `SpecialistResult`.
+
+The result's `confidence` comes from the built-in estimator — a 0.5 baseline moved by 0.1 for each hedging or certainty marker found in the reply, a rough proxy to replace with a domain scorer in production — alongside `success`, `duration_ms`, `output` and any `error`.
+
+The comparison against `confidence_threshold` is the example's own print, since the SDK records the threshold on the state but does not gate on it:
 
 {{ locus_source examples/notebook_23_specialist_agents.py::example_execute }}
 
@@ -88,15 +83,11 @@ Model choice comes from `examples/config.py`: OCI Generative AI when
 example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
 (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
-Parts 2 to 4 (the tool list, the playbook and its selection) are deterministic
-and make no model call; Parts 1 and 5 to 8 make one each. To stay offline
-regardless of the OCI profile on the machine, force the mock model. With tools
-bound, the mock answers with a synthesized tool call and no text, and
-`Specialist.execute` is single-turn, so Parts 1, 5 and 7 print no output line;
-the estimator finds no hedging or certainty markers in the empty reply, so the
-Part 5 confidence sits at its 50% baseline against RIGHTSIZER's 85% threshold.
-Parts 6 and 8, whose specialists carry no tools, print the mock's fixed prose
-reply:
+Parts 2 to 4 (the tool list, the playbook and its selection) are deterministic and make no model call; Parts 1 and 5 to 8 make one each. To stay offline regardless of the OCI profile on the machine, force the mock model.
+
+With tools bound, the mock answers with a synthesized tool call and no text, and `Specialist.execute` is single-turn, so Parts 1, 5 and 7 print no output line. The estimator finds no hedging or certainty markers in the empty reply, so the Part 5 confidence sits at its 50% baseline against RIGHTSIZER's 85% threshold.
+
+Parts 6 and 8, whose specialists carry no tools, print the mock's fixed prose reply:
 
 ```bash
 LOCUS_MODEL_PROVIDER=mock python examples/notebook_23_specialist_agents.py

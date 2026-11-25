@@ -1,14 +1,8 @@
 # Basic graph
 
-Build a data subject access request (DSAR) triage workflow as a graph of
-nodes that pass state to each other. A `StateGraph` is a directed graph in
-which each node is a function — async here — that receives the current
-state and returns a dict of updates to merge back. Use it when one `Agent`
-is not enough: a multi-step privacy pipeline (parse → enrich → verdict) or
-fan-out and fan-in across enrichment lookups. The same primitives carry the
-branching logic of [Notebook 13](notebook_13_conditional_routing.md) and
-the human approval gates of [Notebook 15](notebook_15_human_in_the_loop.md)
-before a DSAR response goes out.
+Build a data subject access request (DSAR) triage workflow as a graph of nodes that pass state to each other. A `StateGraph` is a directed graph in which each node is a function — async here — that receives the current state and returns a dict of updates to merge back.
+
+Use it when one `Agent` is not enough: a multi-step privacy pipeline (parse → enrich → verdict) or fan-out and fan-in across enrichment lookups. The same primitives carry the branching logic of [Notebook 13](notebook_13_conditional_routing.md) and the human approval gates of [Notebook 15](notebook_15_human_in_the_loop.md) before a DSAR response goes out.
 
 What this notebook covers:
 

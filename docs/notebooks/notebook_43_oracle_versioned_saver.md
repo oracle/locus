@@ -7,19 +7,11 @@ with a monotonic `checkpoint_id` and a parent link. The result is an
 auditable lineage of the agent's state inside Oracle Database 26ai,
 queryable with `list_checkpoints` and `get(checkpoint_id=...)`.
 
-Contrast this with `oracle_checkpointer` from notebook 42. That factory
-returns a `StorageBackendAdapter` over `OracleBackend`: a
-`BaseCheckpointer` the agent loop drives itself, saving at the loop's
-save points under generated ids and `MERGE`-upserting one row per key
-it writes: `thread_id:checkpoint_id` for each save, a `thread_id:latest`
-copy of the newest save that the next turn loads, and a
-`thread_id:_checkpoints` index. `OracleCheckpointSaver` is not a
-`BaseCheckpointer`: application code drives it with `put()`, choosing
-each `checkpoint_id`, its `parent_checkpoint_id` link and the row's
-`metadata`, and a second table holds intra-step pending writes
-(`put_writes` / `get_writes`). This notebook runs both side by side:
-the loop-driven checkpointer for live thread continuity, the versioned
-saver for the audit trail.
+Contrast this with `oracle_checkpointer` from notebook 42. That factory returns a `StorageBackendAdapter` over `OracleBackend`: a `BaseCheckpointer` the agent loop drives itself, saving at the loop's save points under generated ids and `MERGE`-upserting one row per key it writes: `thread_id:checkpoint_id` for each save, a `thread_id:latest` copy of the newest save that the next turn loads, and a `thread_id:_checkpoints` index.
+
+`OracleCheckpointSaver` is not a `BaseCheckpointer`: application code drives it with `put()`, choosing each `checkpoint_id`, its `parent_checkpoint_id` link and the row's `metadata`, and a second table holds intra-step pending writes (`put_writes` / `get_writes`).
+
+This notebook runs both side by side: the loop-driven checkpointer for live thread continuity, the versioned saver for the audit trail.
 
 What this notebook covers:
 
@@ -100,17 +92,9 @@ to call from a tool that may run twice:
 python examples/notebook_43_oracle_versioned_saver.py
 ```
 
-The script needs an Oracle Database reachable through the variables in Prerequisites:
-`ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for
-mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or
-`ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias.
-When any of them is unset it prints
-the missing names and the minimal wiring, then exits cleanly without
-opening a connection. With the database in place, the agent's model
-comes from `examples/config.py`: OCI Generative AI when `~/.oci/config`
-has a usable profile, otherwise the bundled mock model. Set
-`LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to
-force one.
+The script needs an Oracle Database reachable through the variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias. When any of them is unset it prints the missing names and the minimal wiring, then exits cleanly without opening a connection.
+
+With the database in place, the agent's model comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile, otherwise the bundled mock model. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
 ## See also
 
