@@ -309,6 +309,15 @@ if TYPE_CHECKING:
 _STOP: object = object()
 
 
+def _on_running_loop(tasks: list[asyncio.Task[None]]) -> bool:
+    """Whether the caller runs on the event loop that owns ``tasks``."""
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return all(task.get_loop() is running for task in tasks)
+
+
 class ToolContextFactory(BaseModel):
     """Factory for creating ToolContext instances."""
 
@@ -584,9 +593,17 @@ class ConcurrentExecutor(ToolExecutor):
             for task in tasks:
                 if not task.done():
                     task.cancel()
-            # ``return_exceptions=True`` swallows the CancelledError
-            # bubbles so cleanup never raises into the caller.
-            await asyncio.gather(*tasks, return_exceptions=True)
+            # Wait for the cancelled tasks only when this generator is being
+            # closed on the loop they run on. A generator that is finalized
+            # by the garbage collector instead (a host loop without
+            # async-generator hooks abandoned the run, as a Temporal workflow
+            # evicted mid-call does) cannot await: Python reports "async
+            # generator ignored GeneratorExit". The tasks are cancelled
+            # either way.
+            if _on_running_loop(tasks):
+                # ``return_exceptions=True`` swallows the CancelledError
+                # bubbles so cleanup never raises into the caller.
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _execute_one(
         self,
