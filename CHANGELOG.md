@@ -24,6 +24,12 @@ policy.
   `scripts/router_training_set.py` checks the split and writes the rows as
   JSON lines, with the level an outcome measurement found when one is passed.
 
+### Documentation
+
+- **The documentation reads in short paragraphs.** A formatting pass over the
+  docs pages: prose that ran past a screen became short paragraphs, lists and
+  tables, with every fact, snippet and link kept. Nothing was added or removed.
+
 ## [6.6.2] - 2026-11-25
 
 ### Fixed
