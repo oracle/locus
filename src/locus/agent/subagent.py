@@ -66,14 +66,13 @@ from __future__ import annotations
 import asyncio
 import inspect
 import threading
-import time
-import uuid
 from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pydantic import BaseModel
 
 from locus.agent.result import StopReason
+from locus.core import sources
 from locus.core.events import LocusEvent, SubagentEvent, TerminateEvent
 from locus.tools.context import current_tool_context, forward_event, forwarding_events
 
@@ -142,7 +141,7 @@ class _ParentRunContext:
         self.cancel_signal = cancel_signal
         #: Child usage reports, drained into the parent's state by the loop.
         self.usage_sink: list[ChildSpend] = []
-        #: ``time.monotonic()`` at which the parent's time budget runs out.
+        #: ``sources.monotonic()`` at which the parent's time budget runs out.
         self.deadline = deadline
         #: The parent's own lifecycle hooks, for a delegating tool that
         #: applies the parent's policy inside the child.
@@ -172,7 +171,7 @@ def enter_parent_run(
     stop when it would), its hooks, and the ObservationPack config its
     subagents get. Returns a token for :func:`exit_parent_run`.
     """
-    deadline = None if time_budget_seconds is None else time.monotonic() + time_budget_seconds
+    deadline = None if time_budget_seconds is None else sources.monotonic() + time_budget_seconds
     return _PARENT_RUN.set(
         _ParentRunContext(
             cancel_signal,
@@ -394,7 +393,7 @@ def _child_budgets(model: Any, agent_kwargs: dict[str, Any]) -> dict[str, Any] |
         return SubagentResult(text="", stop_reason=reason, iterations=0)
 
     if ctx.deadline is not None:
-        left = ctx.deadline - time.monotonic()
+        left = ctx.deadline - sources.monotonic()
         if left <= 0:
             return _exhausted("time_budget")
         own = kwargs.get("time_budget_seconds")
@@ -576,7 +575,7 @@ class Subagent:
         if "checkpointer" in agent_kwargs:
             msg = "a Subagent keeps its own conversation; do not pass a checkpointer"
             raise ValueError(msg)
-        self.task_id = task_id or f"task_{uuid.uuid4().hex[:12]}"
+        self.task_id = task_id or f"task_{sources.uuid4().hex[:12]}"
         self.name = name
         #: Turns this child has run.
         self.turns = 0

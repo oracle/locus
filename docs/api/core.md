@@ -122,6 +122,42 @@ gather their results. `broadcast` / `scatter` are convenience builders.
 ::: locus.core.send.extract_send_results
 ::: locus.core.send.aggregate_send_results
 
+## Clock, ids and randomness
+
+The agent loop reads the time, makes its ids and jitters its retry delays
+through `locus.core.sources`. By default that is the system clock and random
+ids. A host that replays the loop, such as a durable-execution engine, installs
+its own sources so a replayed run reads the same values as the first one.
+
+```python
+from datetime import UTC, datetime
+
+from locus.core import sources
+
+
+class FrozenSources(sources.SystemSources):
+    def now(self) -> datetime:
+        return datetime(2030, 1, 1, tzinfo=UTC)
+
+
+previous = sources.set_sources(FrozenSources())
+try:
+    assert sources.now().year == 2030
+finally:
+    sources.set_sources(previous)
+```
+
+The sources are process-wide and asked on every read, so sources that apply
+only in some contexts decide that per call. They cover `locus.core`,
+`locus.agent`, `locus.multiagent` and the tool executor; a tool, a
+checkpointer or a provider keeps its own clock.
+
+::: locus.core.sources.RuntimeSources
+::: locus.core.sources.SystemSources
+::: locus.core.sources.set_sources
+::: locus.core.sources.get_sources
+::: locus.core.sources.reset_sources
+
 ## Reducers
 
 Reducers combine state updates produced by parallel branches. Pick the

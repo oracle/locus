@@ -11,7 +11,6 @@ import contextlib
 import logging
 import threading
 from collections.abc import AsyncGenerator, AsyncIterator
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -38,6 +37,7 @@ from locus.agent.runtime_loop import (
     _take_iteration_checkpoints,
     close_unfinished_calls,
 )
+from locus.core import sources
 from locus.core.errors import ApprovalPendingError, GSARValidationError
 from locus.core.events import (
     GroundingEvent,
@@ -356,7 +356,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
         Returns:
             AgentResult with final message and state
         """
-        started_at = datetime.now(UTC)
+        started_at = sources.now()
         stop_reason: StopReason = "complete"
         final_message: str = ""
         tool_errors = 0
@@ -466,7 +466,7 @@ class Agent(AgentRuntimeMixin, BaseModel):
                 score=gsar_score_value,
             )
 
-        elapsed_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000
+        elapsed_ms = (sources.now() - started_at).total_seconds() * 1000
         metrics = ExecutionMetrics(
             iterations=state.iteration,
             tool_calls=len(state.tool_executions),

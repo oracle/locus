@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 from enum import StrEnum
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
+
+from locus.core import sources
 
 
 class Role(StrEnum):
@@ -26,7 +27,7 @@ class Role(StrEnum):
 class ToolCall(BaseModel):
     """A tool call requested by the model."""
 
-    id: str = Field(default_factory=lambda: f"call_{uuid4().hex[:12]}")
+    id: str = Field(default_factory=lambda: f"call_{sources.uuid4().hex[:12]}")
     name: str = Field(..., description="Name of the tool to call")
     arguments: dict[str, Any] = Field(
         default_factory=dict,

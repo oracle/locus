@@ -35,11 +35,12 @@ Example - Resume:
 from __future__ import annotations
 
 import contextvars
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+from locus.core import sources
 
 
 # =============================================================================
@@ -92,11 +93,11 @@ class InterruptValue(BaseModel):
         metadata: Additional context for the interrupt
     """
 
-    interrupt_id: str = Field(default_factory=lambda: f"int_{uuid4().hex[:8]}")
+    interrupt_id: str = Field(default_factory=lambda: f"int_{sources.uuid4().hex[:8]}")
     payload: Any
     node_id: str | None = None
     graph_id: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=sources.now)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}

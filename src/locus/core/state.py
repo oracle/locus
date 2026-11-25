@@ -7,12 +7,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from locus.core import sources
 from locus.core.loops import DEFAULT_READ_ONLY_TOOLS, ToolLoop, call_signature, detect_tool_loop
 from locus.core.media import estimate_tokens
 from locus.core.messages import Message, ToolCall
@@ -36,7 +36,7 @@ class ToolExecution(BaseModel):
     result: str | None = None
     error: str | None = None
     duration_ms: float | None = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=sources.now)
     # True when this execution short-circuited via idempotent dedup
     # (a prior call with identical arguments produced the result that was
     # reused). The tool body did NOT run again.
@@ -57,7 +57,7 @@ class ReasoningStep(BaseModel):
     tool_results: list[ToolExecution] = Field(default_factory=list)
     reflection: str | None = None
     confidence_delta: float = 0.0
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=sources.now)
 
 
 class AgentState(BaseModel):
@@ -68,7 +68,7 @@ class AgentState(BaseModel):
     """
 
     # Identity
-    run_id: str = Field(default_factory=lambda: uuid4().hex)
+    run_id: str = Field(default_factory=lambda: sources.uuid4().hex)
     agent_id: str | None = None
 
     # Conversation
@@ -150,8 +150,8 @@ class AgentState(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     # Timing
-    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime = Field(default_factory=sources.now)
+    updated_at: datetime = Field(default_factory=sources.now)
 
     model_config = {"frozen": True}
 
@@ -164,7 +164,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "messages": (*self.messages, message),
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -173,7 +173,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "messages": (*self.messages, *messages),
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -182,7 +182,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "iteration": iteration,
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -200,7 +200,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "provider_state": provider_state,
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -210,7 +210,7 @@ class AgentState(BaseModel):
             update={
                 "tool_executions": (*self.tool_executions, execution),
                 "tool_history": (*self.tool_history, execution.tool_name),
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -219,7 +219,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "reasoning_steps": (*self.reasoning_steps, step),
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -230,7 +230,7 @@ class AgentState(BaseModel):
             update={
                 "confidence": clamped,
                 "confidence_history": (*self.confidence_history, clamped),
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -255,7 +255,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "errors": (*self.errors, error),
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -264,7 +264,7 @@ class AgentState(BaseModel):
         return self.model_copy(
             update={
                 "metadata": {**self.metadata, key: value},
-                "updated_at": datetime.now(UTC),
+                "updated_at": sources.now(),
             }
         )
 
@@ -307,7 +307,7 @@ class AgentState(BaseModel):
                 )
                 or 0.0
             ),
-            "updated_at": datetime.now(UTC),
+            "updated_at": sources.now(),
         }
         if reported_cost_usd is not None:
             update["reported_cost_usd"] = self.reported_cost_usd + reported_cost_usd

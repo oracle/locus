@@ -15,13 +15,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
-import time
 from collections.abc import Awaitable, Callable
 from email.utils import parsedate_to_datetime
 from typing import Any, TypeVar
 
 from locus.agent.config import ModelRetryConfig
+from locus.core import sources
 from locus.core.events import ModelRetryEvent
 from locus.models.failover import FailoverReason, classify
 
@@ -47,8 +46,8 @@ RETRYABLE_REASONS: frozenset[FailoverReason] = frozenset(
 
 # Module-level so tests can replace them without real waiting or randomness.
 _sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
-_uniform: Callable[[float, float], float] = random.uniform
-_monotonic: Callable[[], float] = time.monotonic
+_uniform: Callable[[float, float], float] = sources.uniform
+_monotonic: Callable[[], float] = sources.monotonic
 
 
 def _headers_of(exc: BaseException) -> Any:
@@ -86,7 +85,7 @@ def _parse_retry_after(value: Any) -> float | None:
         when = parsedate_to_datetime(text)
     except (TypeError, ValueError):
         return None
-    return max(0.0, when.timestamp() - time.time())
+    return max(0.0, when.timestamp() - sources.time())
 
 
 def retry_after_seconds(exc: BaseException) -> float | None:

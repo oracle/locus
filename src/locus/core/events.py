@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SerializeAsAny
 
+from locus.core import sources
 from locus.core.messages import ToolCall
 
 
@@ -21,7 +22,7 @@ class LocusEvent(BaseModel):
     """Base class for all Locus events."""
 
     event_type: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=sources.now)
 
     #: Which agent produced this event, from ``AgentConfig.name`` (falling back
     #: to ``agent_id``). Stamped once as the event leaves the loop, so a caller

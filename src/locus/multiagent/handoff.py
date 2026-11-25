@@ -6,14 +6,13 @@
 
 from __future__ import annotations
 
-import time
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from locus.core import sources
 from locus.core.events import LocusEvent
 from locus.core.messages import Message
 from locus.core.state import AgentState
@@ -48,7 +47,7 @@ class HandoffContext(BaseModel):
     """
 
     # Handoff metadata
-    handoff_id: str = Field(default_factory=lambda: f"handoff_{uuid4().hex[:8]}")
+    handoff_id: str = Field(default_factory=lambda: f"handoff_{sources.uuid4().hex[:8]}")
     source_agent_id: str
     target_agent_id: str
     reason: HandoffReason
@@ -75,7 +74,7 @@ class HandoffContext(BaseModel):
     handoff_chain: list[str] = Field(default_factory=list)
 
     # Timing
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=sources.now)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -162,7 +161,7 @@ class HandoffAgent(BaseModel):
     transferring context when handing off.
     """
 
-    id: str = Field(default_factory=lambda: f"agent_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"agent_{sources.uuid4().hex[:8]}")
     name: str
     description: str = ""
     system_prompt: str = ""
@@ -197,7 +196,7 @@ class HandoffAgent(BaseModel):
                 error="No model configured for agent",
             )
 
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
 
         # Build prompt from context
         handoff_prompt = context.to_prompt()
@@ -250,7 +249,7 @@ class HandoffAgent(BaseModel):
             # Estimate new confidence
             confidence = self._estimate_confidence(content, context.confidence)
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
 
             return HandoffResult(
                 handoff_id=context.handoff_id,
@@ -264,7 +263,7 @@ class HandoffAgent(BaseModel):
             )
 
         except Exception as e:  # noqa: BLE001
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             return HandoffResult(
                 handoff_id=context.handoff_id,
                 success=False,
@@ -303,7 +302,7 @@ class Handoff(BaseModel):
     - Chain of custody tracking
     """
 
-    id: str = Field(default_factory=lambda: f"handoff_mgr_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"handoff_mgr_{sources.uuid4().hex[:8]}")
 
     # Registered agents
     agents: dict[str, HandoffAgent] = Field(default_factory=dict)

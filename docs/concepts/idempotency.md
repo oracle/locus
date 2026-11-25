@@ -272,6 +272,11 @@ can be finished with `run_agent_segment(..., kind="continue")`, or
 `agent.continue_turn(thread_id)` by hand. See
 [`locus.durable`](https://github.com/oracle/locus/tree/main/src/locus/durable).
 
+An engine that replays the loop itself, instead of running it in segments,
+needs the loop to read the same times and ids on replay. It installs its own
+clock, ids and random generator with
+[`locus.core.sources`](../api/core.md#clock-ids-and-randomness).
+
 ## Practical recipe — refund approval
 
 A canonical multi-agent idempotency shape: an agent, or several agents

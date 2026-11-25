@@ -50,17 +50,16 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import time
 from collections import defaultdict
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
-from uuid import uuid4
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from locus.agent.durability import CheckpointWriter
+from locus.core import sources
 from locus.core.command import Command, is_command, normalize_node_output
 from locus.core.interrupt import (
     InterruptException,
@@ -162,7 +161,7 @@ class StreamEvent(BaseModel):
     mode: StreamMode
     node_id: str | None = None
     data: Any = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = Field(default_factory=sources.now)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -193,14 +192,13 @@ class RetryPolicy(BaseModel):
 
     def get_delay(self, attempt: int) -> float:
         """Calculate delay for a given attempt number."""
-        import random
 
         delay = min(
             self.initial_interval * (self.backoff_factor**attempt),
             self.max_interval,
         )
         if self.jitter:
-            delay *= 0.5 + random.random() * 0.5  # noqa: S311
+            delay *= sources.uniform(0.5, 1.0)  # noqa: S311
         return delay
 
 
@@ -233,7 +231,7 @@ class Node(BaseModel):
     Supports retry policies with exponential backoff and result caching.
     """
 
-    id: str = Field(default_factory=lambda: f"node_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"node_{sources.uuid4().hex[:8]}")
     name: str
     description: str = ""
 
@@ -285,7 +283,7 @@ class Node(BaseModel):
         Returns:
             NodeResult with output or error
         """
-        started_at = datetime.now(UTC)
+        started_at = sources.now()
         attempts = 0
 
         # Determine retry limit from policy or legacy config
@@ -295,7 +293,6 @@ class Node(BaseModel):
         if self.cache_policy and self.cache_policy.enabled:
             import hashlib
             import json as _json
-            import time as _time
 
             cache_key = hashlib.sha256(  # noqa: S324
                 f"{self.id}:{_json.dumps(inputs, sort_keys=True, default=str)}".encode()
@@ -303,13 +300,13 @@ class Node(BaseModel):
             cached = _node_cache.get(cache_key)
             if cached is not None:
                 cached_output, cached_time = cached
-                if _time.time() - cached_time < self.cache_policy.ttl_seconds:
+                if sources.time() - cached_time < self.cache_policy.ttl_seconds:
                     return NodeResult(
                         node_id=self.id,
                         status=NodeStatus.COMPLETED,
                         output=cached_output,
                         started_at=started_at,
-                        completed_at=datetime.now(UTC),
+                        completed_at=sources.now(),
                         duration_ms=0.0,
                     )
 
@@ -321,7 +318,7 @@ class Node(BaseModel):
                         node_id=self.id,
                         status=NodeStatus.SKIPPED,
                         started_at=started_at,
-                        completed_at=datetime.now(UTC),
+                        completed_at=sources.now(),
                     )
 
                 # Set up execution context for interrupt handling
@@ -360,7 +357,7 @@ class Node(BaseModel):
                         else:
                             output = await coro
 
-                completed_at = datetime.now(UTC)
+                completed_at = sources.now()
                 duration_ms = (completed_at - started_at).total_seconds() * 1000
 
                 # Parse output for Commands and Sends
@@ -374,9 +371,7 @@ class Node(BaseModel):
 
                 # Store in cache if policy set
                 if self.cache_policy and self.cache_policy.enabled:
-                    import time as _time
-
-                    _node_cache[cache_key] = (output, _time.time())
+                    _node_cache[cache_key] = (output, sources.time())
 
                 return NodeResult(
                     node_id=self.id,
@@ -391,7 +386,7 @@ class Node(BaseModel):
 
             except InterruptException as e:
                 # Node is requesting human input
-                completed_at = datetime.now(UTC)
+                completed_at = sources.now()
                 duration_ms = (completed_at - started_at).total_seconds() * 1000
                 return NodeResult(
                     node_id=self.id,
@@ -403,7 +398,7 @@ class Node(BaseModel):
                 )
 
             except TimeoutError:
-                completed_at = datetime.now(UTC)
+                completed_at = sources.now()
                 return NodeResult(
                     node_id=self.id,
                     status=NodeStatus.FAILED,
@@ -416,7 +411,7 @@ class Node(BaseModel):
             except Exception as e:  # noqa: BLE001
                 attempts += 1
                 if attempts >= max_attempts:
-                    completed_at = datetime.now(UTC)
+                    completed_at = sources.now()
                     duration_ms = (completed_at - started_at).total_seconds() * 1000
                     return NodeResult(
                         node_id=self.id,
@@ -679,7 +674,7 @@ class StateGraph(BaseModel):
     - State reducers for composable updates
     """
 
-    id: str = Field(default_factory=lambda: f"graph_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"graph_{sources.uuid4().hex[:8]}")
     name: str = ""
     description: str = ""
 
@@ -1025,7 +1020,7 @@ class StateGraph(BaseModel):
         Returns:
             GraphResult with final state and outputs
         """
-        start_time = datetime.now(UTC)
+        start_time = sources.now()
         cfg = config or self.config
         # How this run writes its checkpoints (``cfg.durability``).
         writer = CheckpointWriter(cfg.checkpointer, cfg.durability) if cfg.checkpointer else None
@@ -1157,7 +1152,7 @@ class StateGraph(BaseModel):
                         node_results=node_results,
                         final_state=final_state_with_resume,
                         execution_order=execution_order,
-                        duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+                        duration_ms=(sources.now() - start_time).total_seconds() * 1000,
                         interrupt=interrupt_state,
                         iterations=iterations,
                     )
@@ -1180,7 +1175,7 @@ class StateGraph(BaseModel):
                     node = self.nodes[node_id]
                     node_inputs = self._gather_inputs(node_id, state)
                     is_resume = node_id == resume_node
-                    span_id = uuid4().hex[:8]
+                    span_id = sources.uuid4().hex[:8]
                     node_span_ids[node_id] = span_id
                     await emit(
                         EV_GRAPH_NODE_STARTED,
@@ -1200,7 +1195,7 @@ class StateGraph(BaseModel):
                     )
 
                 if tasks:
-                    parallel_started = time.perf_counter()
+                    parallel_started = sources.monotonic()
                     results = await asyncio.gather(*tasks)
                     for node_id, result in zip(
                         [n for n in current_nodes if n != END],
@@ -1215,7 +1210,7 @@ class StateGraph(BaseModel):
                             node_id=node_id,
                             span_id=node_span_ids.get(node_id),
                             status=str(result.status),
-                            duration_ms=(time.perf_counter() - parallel_started) * 1000,
+                            duration_ms=(sources.monotonic() - parallel_started) * 1000,
                             parallel=True,
                         )
                         await _emit_node_events(
@@ -1230,8 +1225,8 @@ class StateGraph(BaseModel):
                     node = self.nodes[node_id]
                     node_inputs = self._gather_inputs(node_id, state)
                     is_resume = node_id == resume_node
-                    span_id = uuid4().hex[:8]
-                    started_at = time.perf_counter()
+                    span_id = sources.uuid4().hex[:8]
+                    started_at = sources.monotonic()
                     await emit(
                         EV_GRAPH_NODE_STARTED,
                         graph_id=self.id,
@@ -1254,7 +1249,7 @@ class StateGraph(BaseModel):
                         node_id=node_id,
                         span_id=span_id,
                         status=str(result.status),
-                        duration_ms=(time.perf_counter() - started_at) * 1000,
+                        duration_ms=(sources.monotonic() - started_at) * 1000,
                         parallel=False,
                     )
                     await _emit_node_events(_event_sink, node_id, result, state, cfg.stream_mode)
@@ -1320,7 +1315,7 @@ class StateGraph(BaseModel):
                         node_results=node_results,
                         final_state=final_state_with_resume,
                         execution_order=execution_order,
-                        duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+                        duration_ms=(sources.now() - start_time).total_seconds() * 1000,
                         interrupt=interrupt_state,
                         iterations=iterations,
                     )
@@ -1372,7 +1367,7 @@ class StateGraph(BaseModel):
                         node_results=node_results,
                         final_state=state,
                         execution_order=execution_order,
-                        duration_ms=(datetime.now(UTC) - start_time).total_seconds() * 1000,
+                        duration_ms=(sources.now() - start_time).total_seconds() * 1000,
                         interrupt=interrupt_state,
                         iterations=iterations,
                     )
@@ -1405,7 +1400,7 @@ class StateGraph(BaseModel):
             current_nodes = pending_nodes
 
         # Calculate duration
-        end_time = datetime.now(UTC)
+        end_time = sources.now()
         duration_ms = (end_time - start_time).total_seconds() * 1000
 
         # Determine final outputs (from last executed nodes)
@@ -1846,7 +1841,7 @@ class StateGraph(BaseModel):
         if saved is None:
             where = f"checkpoint {checkpoint_id!r} of " if checkpoint_id else ""
             raise LookupError(f"no {where}thread {thread_id!r}")
-        forked = new_thread_id or f"{thread_id}-fork-{uuid4().hex[:8]}"
+        forked = new_thread_id or f"{thread_id}-fork-{sources.uuid4().hex[:8]}"
         if forked == thread_id:
             raise ValueError("a fork needs a thread id different from its parent")
         await checkpointer.save(
