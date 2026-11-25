@@ -173,15 +173,11 @@ values the run never read.
 
 ### Claims
 
-`claims` are statements about the run you want settled against its
-evidence. Code confirms a claim whose figures all appear in the ledger and
-cites the rows. The rest go to the judge in `arun()` with the ledger as
-the only evidence; the judge returns `confirmed`, `contradicted` or
-`unverifiable` per claim, cites row ids and quotes what it read, and code
-checks that the quote really is in the row it cites. A citation that does
-not hold is downgraded to `unverifiable` with the reason, so the judge
-cannot confirm a claim from memory. Each claim is one `claim:<i>` check,
-and `result.claim_checks` carries the verdicts.
+`claims` are statements about the run you want settled against its evidence. Code confirms a claim whose figures all appear in the ledger and cites the rows.
+
+The rest go to the judge in `arun()` with the ledger as the only evidence; the judge returns `confirmed`, `contradicted` or `unverifiable` per claim, cites row ids and quotes what it read, and code checks that the quote really is in the row it cites.
+
+A citation that does not hold is downgraded to `unverifiable` with the reason, so the judge cannot confirm a claim from memory. Each claim is one `claim:<i>` check, and `result.claim_checks` carries the verdicts.
 
 ```python
 from locus.evaluation import EvalCase
@@ -195,15 +191,12 @@ case = EvalCase(
 
 ### Asserting the control layer
 
-An agent built on Locus does not hold the trigger: a gated tool's call
-clears the policy first, and a refused call hands the model a JSON object
-whose `status` is `denied` or `held_for_approval`. The ledger reads that
-contract, which makes the behaviour of the control layer an ordinary
-assertion. `forbidden_tools` passes when the tool never executed, where a
-call the gate refused did not execute; `expected_refusals` passes when the
-gate refused at least one call of it. With `CompromisedModel` from
-`locus.testing` as the agent's model, "the gate holds" becomes a case in
-the same suite as everything else.
+An agent built on Locus does not hold the trigger: a gated tool's call clears the policy first, and a refused call hands the model a JSON object whose `status` is `denied` or `held_for_approval`. The ledger reads that contract, which makes the behaviour of the control layer an ordinary assertion.
+
+- `forbidden_tools` passes when the tool never executed, where a call the gate refused did not execute.
+- `expected_refusals` passes when the gate refused at least one call of it.
+
+With `CompromisedModel` from `locus.testing` as the agent's model, "the gate holds" becomes a case in the same suite as everything else.
 
 ```python
 from locus.agent import Agent
@@ -266,33 +259,29 @@ case = EvalCase(
 )
 ```
 
-`TrajectoryMatch` compares the sequence of tool calls with the one expected.
-`strict` wants the same calls in the same order; `unordered` the same calls
-in any order; `subset` the expected calls in order with other calls allowed
-around them, which is the mode for "it must look the order up before it
-refunds" when a retry or an extra lookup is not a failure. The verdict's
-score gives partial credit (the common subsequence, the multiset overlap,
-the share of expected steps found) and `passed` wants a full match. A call
-the gate refused is part of the path by default; `executed_only=True` drops
-refused and errored calls.
+`TrajectoryMatch` compares the sequence of tool calls with the one expected:
+
+- `strict` wants the same calls in the same order;
+- `unordered` the same calls in any order;
+- `subset` the expected calls in order with other calls allowed around them, which is the mode for "it must look the order up before it refunds" when a retry or an extra lookup is not a failure.
+
+The verdict's score gives partial credit (the common subsequence, the multiset overlap, the share of expected steps found) and `passed` wants a full match. A call the gate refused is part of the path by default; `executed_only=True` drops refused and errored calls.
 
 `ToolSelection` scores which tools were chosen against which should have
 been: recall over `expected`, precision over what was selected, and a list
 of `forbidden` tools any one of which fails the verdict. Extra tools are
 allowed unless `allow_extra=False`.
 
-`ArgumentCorrectness` compares the arguments of one tool's call with the
-ones expected, and reads the tool's parameter schema to do it: on a
-`number` argument `"49.9"` and `49.9` agree within `tolerance` (absolute,
-per argument with `tolerances`, or `relative_tolerance`); a `boolean` accepts
-`"true"`; an `array` compares element by element, or as a set when the
-schema says `uniqueItems`; an `object` compares its properties recursively.
-The runner fills the schema in from the tool on the agent under test, so a
-case rarely has to carry one; pass `schema=` when it does. Strings compare
-case-insensitively with whitespace folded unless `ignore_case=False`,
-`strict_keys=True` also fails on arguments the call carried that were not
-expected, and `occurrence` chooses which call of the tool must agree
-(`any`, `first`, `last` or `all`). A tool that was never called scores 0.
+`ArgumentCorrectness` compares the arguments of one tool's call with the ones expected, and reads the tool's parameter schema to do it:
+
+- on a `number` argument `"49.9"` and `49.9` agree within `tolerance` (absolute, per argument with `tolerances`, or `relative_tolerance`);
+- a `boolean` accepts `"true"`;
+- an `array` compares element by element, or as a set when the schema says `uniqueItems`;
+- an `object` compares its properties recursively.
+
+The runner fills the schema in from the tool on the agent under test, so a case rarely has to carry one; pass `schema=` when it does.
+
+Strings compare case-insensitively with whitespace folded unless `ignore_case=False`, `strict_keys=True` also fails on arguments the call carried that were not expected, and `occurrence` chooses which call of the tool must agree (`any`, `first`, `last` or `all`). A tool that was never called scores 0.
 
 Every evaluator is data: it loads from a case file under its `kind`
 (`trajectory_match`, `tool_selection`, `argument_correctness`) and enters
@@ -332,16 +321,11 @@ reporting green with the rubric unevaluated. On `arun()`, a rubric case
 with no judge configured fails loudly too, under a
 `rubric:no_judge_configured` check.
 
-On a graded case, `EvalResult.score` is the judge's 0–1 score, capped by
-the fraction of checks passed, so a case with a failed structural check
-never scores 1.0. Use a different
-model from the one under test where you can — a model grading its own
-output is measuring self-consistency, not correctness. When the runner can
-tell that the judge model is the model under test, it stamps
-`provenance.self_graded` on the verdict and the report ends with a warning;
-the case is not failed for it. `LLMJudge` and
-`Verdict` are documented in the
-[evaluation API reference](../api/evaluation.md#grading-an-answer-that-has-no-single-right-string).
+On a graded case, `EvalResult.score` is the judge's 0–1 score, capped by the fraction of checks passed, so a case with a failed structural check never scores 1.0.
+
+Use a different model from the one under test where you can — a model grading its own output is measuring self-consistency, not correctness. When the runner can tell that the judge model is the model under test, it stamps `provenance.self_graded` on the verdict and the report ends with a warning; the case is not failed for it.
+
+`LLMJudge` and `Verdict` are documented in the [evaluation API reference](../api/evaluation.md#grading-an-answer-that-has-no-single-right-string).
 
 ## A rubric with dimensions and grades
 
@@ -562,14 +546,9 @@ over the turns.
 
 ## Online evaluation
 
-A regression suite grades the cases somebody wrote; production grades the
-ones nobody wrote. `OnlineEvaluator` subscribes to the event bus, follows
-each run's `agent.*` events to its `agent.terminate`, keeps the runs a
-sampler picks within a budget, turns each into a case from a template of
-expectations, and grades it in the background with the same checks, the same
-evaluators and the same judge as the suite. The results fold into an
-ordinary `EvalReport`, so the gate, the diff and the stores read it
-unchanged, and every report from one template carries the same fingerprint.
+A regression suite grades the cases somebody wrote; production grades the ones nobody wrote. `OnlineEvaluator` subscribes to the event bus, follows each run's `agent.*` events to its `agent.terminate`, keeps the runs a sampler picks within a budget, turns each into a case from a template of expectations, and grades it in the background with the same checks, the same evaluators and the same judge as the suite.
+
+The results fold into an ordinary `EvalReport`, so the gate, the diff and the stores read it unchanged, and every report from one template carries the same fingerprint.
 
 ```python
 from locus.evaluation import EvalCase, OnlineBudget, OnlineEvaluator, ToolSelection, fraction
@@ -599,18 +578,11 @@ evaluator's lifetime, per sliding minute, and in flight at once; a sampled
 run that does not fit is counted in `over_budget`, never queued without
 bound.
 
-What the bus carries, the evaluator grades. The bridge publishes every tool
-call with its name, outcome and a preview of its result, the iteration count,
-the stop reason and a preview of the final message; it does not publish the
-prompt, the arguments or the full answer, which keeps user data off the bus
-by design. So the trajectory evaluators, the budgets and the forbidden-tool
-checks grade a bus-only run completely, while a rubric or a receipt check
-sees previews until the application attaches what it knows:
-`evaluator.attach(run_id, prompt=..., output=..., arguments={span_id: {...}})`.
-An application that holds the `AgentResult` can hand it over whole with
-`await evaluator.submit(prompt, result)`, which goes through the same sampler
-and budget. A grading that fails (the judge unreachable, say) is recorded in
-`evaluator.errors` rather than raised out of the background task.
+What the bus carries, the evaluator grades. The bridge publishes every tool call with its name, outcome and a preview of its result, the iteration count, the stop reason and a preview of the final message; it does not publish the prompt, the arguments or the full answer, which keeps user data off the bus by design.
+
+So the trajectory evaluators, the budgets and the forbidden-tool checks grade a bus-only run completely, while a rubric or a receipt check sees previews until the application attaches what it knows: `evaluator.attach(run_id, prompt=..., output=..., arguments={span_id: {...}})`.
+
+An application that holds the `AgentResult` can hand it over whole with `await evaluator.submit(prompt, result)`, which goes through the same sampler and budget. A grading that fails (the judge unreachable, say) is recorded in `evaluator.errors` rather than raised out of the background task.
 
 ## Comparable reports and a gate for CI
 
@@ -649,16 +621,17 @@ through it.
 
 ### Keeping reports and reading the trend
 
-A report on disk is one build's artefact. A regression is a question about
-several, so a `ReportStore` keeps reports by suite and by fingerprint, and
-`trend` reads the last N of one suite back and says where each moved against
-the one before it. Five stores share the interface: a directory
-(`FileReportStore`), one SQLite database file (`SqliteReportStore`, a local
-history a query can read without a server), a table on an Oracle AI Database (`OracleReportStore`,
-the report as JSON with its headline figures in columns), an OCI Object
-Storage bucket (`OCIBucketReportStore`) and any S3-compatible bucket
-(`S3ReportStore`). `report_store(spec)` opens one from a string, which is how
-the command line names it:
+A report on disk is one build's artefact. A regression is a question about several, so a `ReportStore` keeps reports by suite and by fingerprint, and `trend` reads the last N of one suite back and says where each moved against the one before it.
+
+Five stores share the interface:
+
+- a directory (`FileReportStore`);
+- one SQLite database file (`SqliteReportStore`, a local history a query can read without a server);
+- a table on an Oracle AI Database (`OracleReportStore`, the report as JSON with its headline figures in columns);
+- an OCI Object Storage bucket (`OCIBucketReportStore`);
+- and any S3-compatible bucket (`S3ReportStore`).
+
+`report_store(spec)` opens one from a string, which is how the command line names it:
 
 ```python
 from locus.evaluation import report_store, trend
@@ -671,36 +644,25 @@ print(history.summary())
 assert not history.regressed, history.summary()
 ```
 
-`file:///var/lib/locus/evals` (or a bare path), `sqlite:///var/lib/locus/evals.db`
-(what follows `sqlite://` is the file's path, so `sqlite://evals.db` is relative
-to the working directory), `oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS`
-(a bare `oracle://` reads `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`,
-`ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the
-environment, as the approval stores do; `config_dir=` names the `tnsnames.ora`
-directory for a TLS-only database, `wallet=` the wallet for mutual TLS),
-`oci://<namespace>/<bucket>/<prefix>?profile=&region=&auth=`
-and `s3://<bucket>/<prefix>?endpoint_url=` are the forms. Each point of the
-trend carries the pass count, the average and their deltas against the
-previous point; a point whose fingerprint differs from the previous one is
-marked `suite_changed` rather than read as a regression, and
-`trend.regressed` says whether the newest report is worse than the one
-before it. `locus eval run --store <spec> --suite <name>` keeps the report
-after a run and `locus eval trend --store <spec> --suite <name> --last 10`
-prints the trend, exiting 1 on a regression.
+The forms are:
+
+- `file:///var/lib/locus/evals` (or a bare path);
+- `sqlite:///var/lib/locus/evals.db` (what follows `sqlite://` is the file's path, so `sqlite://evals.db` is relative to the working directory);
+- `oracle://user:pw@/?dsn=mydb_low&wallet=/opt/wallet&table=LOCUS_EVAL_REPORTS` (a bare `oracle://` reads `ORACLE_DSN`, `ORACLE_USER`, `ORACLE_PASSWORD`, `ORACLE_CONFIG_DIR`, `ORACLE_WALLET` and `ORACLE_WALLET_PASSWORD` from the environment, as the approval stores do; `config_dir=` names the `tnsnames.ora` directory for a TLS-only database, `wallet=` the wallet for mutual TLS);
+- `oci://<namespace>/<bucket>/<prefix>?profile=&region=&auth=`;
+- and `s3://<bucket>/<prefix>?endpoint_url=`.
+
+Each point of the trend carries the pass count, the average and their deltas against the previous point; a point whose fingerprint differs from the previous one is marked `suite_changed` rather than read as a regression, and `trend.regressed` says whether the newest report is worse than the one before it.
+
+`locus eval run --store <spec> --suite <name>` keeps the report after a run and `locus eval trend --store <spec> --suite <name> --last 10` prints the trend, exiting 1 on a regression.
 
 ## When the judge cannot grade
 
-A judge that answers with an empty reply, prose without a verdict, a call
-to some other tool, or dimension scores for none of the rubric's
-dimensions has not graded the case. The verdict is `abstained`, the result
-carries `not_graded_reason`, and the report counts it under `not_graded`
-instead of `failed` and leaves it out of `avg_score`. A dead judge must
-neither lower the agent's average nor let a case through. The summary
-prints such a case as `[NOT GRADED]` with the reason, which is usually a
-reasoning model that spent its token budget before answering; raise
-`LLMJudge(max_tokens=...)`. A judge that cannot be reached at all, or runs
-past `timeout_s`, raises `JudgeUnavailableError` out of `arun()` rather
-than being recorded against any case.
+A judge that answers with an empty reply, prose without a verdict, a call to some other tool, or dimension scores for none of the rubric's dimensions has not graded the case. The verdict is `abstained`, the result carries `not_graded_reason`, and the report counts it under `not_graded` instead of `failed` and leaves it out of `avg_score`.
+
+A dead judge must neither lower the agent's average nor let a case through. The summary prints such a case as `[NOT GRADED]` with the reason, which is usually a reasoning model that spent its token budget before answering; raise `LLMJudge(max_tokens=...)`.
+
+A judge that cannot be reached at all, or runs past `timeout_s`, raises `JudgeUnavailableError` out of `arun()` rather than being recorded against any case.
 
 ## Common gotchas
 
@@ -716,16 +678,9 @@ than being recorded against any case.
 
 ## Evals are audit evidence
 
-The runner drives the same agent through the same loop as production, so
-an eval run is made of the same typed events — and any admission
-decisions land on the same hash-chained `AuditTrail` (each entry commits
-to the one before it, so editing any record breaks verification) the
-gate always writes. A passing eval is audit evidence, not a screenshot. For
-grounded-claim scoring — did each claim survive contact with its
-evidence? — set `grounding=` on the case: the runner's judge model runs
-the [GSAR audit](gsar.md) over the answer and the run's evidence, and the
-check passes when the score clears the floor. An audit that abstains
-leaves the case not graded rather than failed.
+The runner drives the same agent through the same loop as production, so an eval run is made of the same typed events — and any admission decisions land on the same hash-chained `AuditTrail` (each entry commits to the one before it, so editing any record breaks verification) the gate always writes. A passing eval is audit evidence, not a screenshot.
+
+For grounded-claim scoring — did each claim survive contact with its evidence? — set `grounding=` on the case: the runner's judge model runs the [GSAR audit](gsar.md) over the answer and the run's evidence, and the check passes when the score clears the floor. An audit that abstains leaves the case not graded rather than failed.
 
 ## Source and notebook
 

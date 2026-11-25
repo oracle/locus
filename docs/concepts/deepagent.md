@@ -335,7 +335,9 @@ summaries. Instead of checking claims per-turn inside the agent loop,
 the workflow runs the full ReAct phase first, builds a causal chain from
 the evidence (`causal_inference=True`; pass `False` to go straight to the
 summary), summarizes, then scores the summary against the evidence with
-an LLM-as-judge. Below the threshold the router first regenerates the
+an LLM-as-judge.
+
+Below the threshold the router first regenerates the
 summary without re-running tools (`max_regenerations`, default 1), then
 replans with an execute prompt focused on the ungrounded claims
 (`max_replans`, default 2), and ends the run once both are used up.

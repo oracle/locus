@@ -170,14 +170,18 @@ Opt in with `allow_cycles=True` plus an iteration cap.
 The production concerns that turn a demo into a product — typed terminal
 artifacts, idempotent tools, checkpointing, reflexion, grounding and
 streaming — work in any of the eight shapes, so choosing a shape does not
-trade away production readiness. And a side-effecting tool in any
+trade away production readiness.
+
+And a side-effecting tool in any
 shape can be put behind the admission gate — wrap it with
 [`gate_tool(...)`](control-layer.md) or call
 [`admit()`](control-layer.md) in its body, passing your
 `ControlPolicy` and an `AuditTrail`. Every decision on it, whether allow,
 hold or deny, is then appended to that hash-chained trail: each entry
 commits to the one before it, so an edit, reorder, or deletion in the
-middle breaks verification. Sign the trail and verify it against the
+middle breaks verification.
+
+Sign the trail and verify it against the
 public key (`verify(keys=...)`), and a chain rebuilt around an edit by
 anyone without your signing key fails too.
 
@@ -226,12 +230,15 @@ can be a whole `StateGraph` added as a subgraph. Give a node a
 `retry_policy` and the graph re-runs it with backoff when it raises, up
 to `max_attempts` times. A `TimeoutError`, including a node's own
 `timeout_ms`, fails the node without a retry.
+
 `Orchestrator.execute` and `Swarm.execute` catch their own errors and
 return a result with `success=False`, so a node that wraps one should
 check `result.success` and raise if you want the retry to fire. An
 orchestrator still reports `success=True` when a single specialist
 fails: that failure is on `result.specialist_results[<id>].error`, so
-check it as well if a failed specialist should trigger the retry. Pick
+check it as well if a failed specialist should trigger the retry.
+
+Pick
 the shape that fits each layer of the problem.
 
 ## See also

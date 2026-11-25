@@ -227,12 +227,12 @@ code review. The underlying number bands are:
 Event objects are `ProtectedEvent` instances with a custom
 `__setattr__`: each event declares a small `_writable` set, and writing
 any other field raises `AttributeError`. The fields that *do* let hooks
-steer the agent are plain attribute assignments — on
-`BeforeToolCallEvent` you can set `event.arguments` (rewrite the inputs,
-then call `event.resign(by="<hook name>")`: tool calls are signed over
-their arguments, and a rewrite no hook has signed for is refused by the
-executor) and `event.cancel` (skip the call); on `AfterToolCallEvent` you
-can set `event.result` and `event.retry`. Setting `cancel` to a string
+steer the agent are plain attribute assignments:
+
+- On `BeforeToolCallEvent` you can set `event.arguments` (rewrite the inputs, then call `event.resign(by="<hook name>")`: tool calls are signed over their arguments, and a rewrite no hook has signed for is refused by the executor) and `event.cancel` (skip the call).
+- On `AfterToolCallEvent` you can set `event.result` and `event.retry`.
+
+Setting `cancel` to a string
 records the reason:
 
 ```python

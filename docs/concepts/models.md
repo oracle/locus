@@ -61,12 +61,16 @@ logs them, and which jurisdiction holds them.
 {{ locus_diagram provider-routing }}
 
 `get_model()` splits the string at the first colon and calls the factory
-registered for that prefix; an unknown prefix raises `ValueError`. Under
+registered for that prefix; an unknown prefix raises `ValueError`.
+
+Under
 `oci:` the model id picks the transport: a `cohere.*` id or a Dedicated AI
 Cluster (DAC) endpoint OCID goes to `OCIModel` over the OCI SDK, and every
 other id goes to `OCIChatCompletionsModel`, the default, on the region's
 `/openai/v1` endpoint. `OCIResponsesModel` is never chosen by the prefix:
-construct it yourself and pass the instance to `Agent(model=...)`. Every
+construct it yourself and pass the instance to `Agent(model=...)`.
+
+Every
 OpenAI-compatible prefix builds `OpenAIModel` at the `base_url` the routing
 table resolves for it; `runpod:` is the one managed prefix without a default
 endpoint, so set `RUNPOD_ENDPOINT_ID` or pass `base_url`.

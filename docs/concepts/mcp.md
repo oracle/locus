@@ -4,7 +4,9 @@ Build a tool once — issue a refund, roll out a deploy, enrich an
 IOC (indicator of compromise — an IP, domain, or file hash) — and let
 any agent call it. [MCP](https://modelcontextprotocol.io)
 is the protocol for that: wrap a function like `lookup_order` or `issue_refund`
-in a MCP server, and any MCP client (Claude Desktop, Cline, an agent, your own tooling) invokes it without bespoke glue. The same SDK
+in a MCP server, and any MCP client (Claude Desktop, Cline, an agent, your own tooling) invokes it without bespoke glue.
+
+The same SDK
 also *consumes* existing MCP servers — a billing service, a
 case-management server, a threat-intel feed — so your agent can reach
 tools it didn't ship.
@@ -303,14 +305,13 @@ async for event in agent.run("refund order 4821"):
             ...
 ```
 
-What happens: the client tells the server the question is unanswered
-for now (`cancel`), the tool call returns the interrupt marker, and the
-run pauses on an `InterruptEvent` whose `fields` describe the answer the
-schema asks for (one field with an `enum` also fills `options`) and
-whose `metadata["mcp_elicitation"]` carries the server, tool and schema.
-`answer_elicitation(event, answer)` parks the answer on the client;
-`agent.resume(answer, perform_dangling=True)` re-issues the paused call,
-the server asks again, and this time it gets the answer. The answer is a
+What happens:
+
+1. The client tells the server the question is unanswered for now (`cancel`), the tool call returns the interrupt marker, and the run pauses on an `InterruptEvent` whose `fields` describe the answer the schema asks for (one field with an `enum` also fills `options`) and whose `metadata["mcp_elicitation"]` carries the server, tool and schema.
+2. `answer_elicitation(event, answer)` parks the answer on the client.
+3. `agent.resume(answer, perform_dangling=True)` re-issues the paused call, the server asks again, and this time it gets the answer.
+
+The answer is a
 mapping matching the schema, or — for a one-field schema — a string,
 bool or number coerced to the field's type (`"yes"` → `True`); `None`
 declines. Because the call is re-issued, a server should ask before it
@@ -395,7 +396,9 @@ up through `LocusMCPServer` (its tools plus `run_agent` and
 
 `@tool`'s name carries across unchanged (hyphens included); its
 docstring becomes the MCP description, with the `Args:` block becoming
-the per-parameter descriptions. The JSON schema is not copied byte for
+the per-parameter descriptions.
+
+The JSON schema is not copied byte for
 byte: FastMCP rebuilds it from a synthetic signature that types every
 parameter as a string and gives optional parameters a `null` default,
 so an `int` or `bool` parameter is advertised as a string. The tool

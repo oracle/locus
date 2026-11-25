@@ -35,7 +35,9 @@ takes the tool's `(name, arguments)` tuple as the key for each call the
 model emits. **The first call with a given key hits the function body** and
 the result is recorded. **A later call with the same key in the `run()` loop
 short-circuits to the cached response** without invoking the body
-(exceptions below). The drawing follows one call through the loop's Execute
+(exceptions below).
+
+The drawing follows one call through the loop's Execute
 step: the key, the check against the run's record, and the result's way back
 to the model.
 
@@ -154,7 +156,9 @@ There is an unavoidable boundary between two systems:
 An in-memory cache cannot close that window. A checkpointer narrows it to the
 time between the call returning and the next save; the tool-effect ledger
 below narrows it to the ledger write itself, a single small record made the
-moment the call returns. What remains — the process dying between the
+moment the call returns.
+
+What remains — the process dying between the
 external success and that record — only the downstream system can close, by
 recognizing the same stable idempotency key and returning the original result
 rather than repeating the operation. Treat `idempotent=True` as agent-loop
@@ -183,11 +187,15 @@ where *step* is the iteration and *canonical arguments* is the call's
 argument dict serialised with sorted keys, so argument order and whitespace do
 not make a new key but a changed value does. The entry carries the full
 `ToolResult` (content, error, structured content), the id of the call that
-produced it, and the invocation (the run id) it belongs to. Entries live in
+produced it, and the invocation (the run id) it belongs to.
+
+Entries live in
 the thread's own checkpointer — as checkpoints of the sidecar thread
 `<thread_id>~ledger`, one per call under its key, plus a `manifest` naming the
 run, its prompt and metadata — so every backend has the ledger without code of
-its own, and the turn's final save deletes the sidecar once that checkpoint
+its own.
+
+The turn's final save deletes the sidecar once that checkpoint
 holds every result. A sidecar found later is the trace of a turn that never
 finished.
 
@@ -221,7 +229,9 @@ The continued run calls the model again from the last checkpoint. When the
 model emits a call the ledger has — same step, same tool, same canonical
 arguments, same invocation — the executor returns the recorded result and the
 tool body does not run; `ToolResult.replayed` is `True` and the
-`ToolCompleteEvent` carries the recorded output. A call with no record runs
+`ToolCompleteEvent` carries the recorded output.
+
+A call with no record runs
 and is recorded. A record from another invocation (an earlier turn on the
 thread that never finished) is never served: a new turn on the thread starts
 with a fresh run id.

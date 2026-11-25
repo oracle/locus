@@ -23,33 +23,27 @@ context window ever filling up with raw history.
 All memories are persisted via a
 [`BaseStore`](checkpointers.md#the-built-in-store-inmemorystore) backend
 — the same store abstraction used for cross-thread key-value storage.
-Four `BaseStore` implementations ship. The built-in `InMemoryStore`
-covers local development and tests, but it is process-local and not
-durable. `HolographicStore` (SQLite + FTS5, no external infrastructure)
-is durable when constructed with a file path —
-`HolographicStore(path="memories.db")`; its default `path=":memory:"`
-is not. `PgMemory` (Postgres + pgvector, per-tenant row-level security,
-needs the `postgresql` extra) is the shared, multi-tenant option. It
-treats the first namespace element as the tenant, so put the tenant id
-first in `namespace_prefix`, and its `search()` ranks by meaning only
-when you pass it an `embedder` — without one, ranking is
-lexical/associative token matching. `OracleStore` (Oracle Database
-26ai, native `VECTOR` + JSON columns, needs the `oracledb` extra) keeps
-memories next to the rest of your Oracle data; see
-[Oracle Database 26ai](#oracle-database-26ai-oraclestore-and-oracleagentmemorymanager)
-below.
+Four `BaseStore` implementations ship:
+
+- The built-in `InMemoryStore` covers local development and tests, but it is process-local and not durable.
+- `HolographicStore` (SQLite + FTS5, no external infrastructure) is durable when constructed with a file path — `HolographicStore(path="memories.db")`; its default `path=":memory:"` is not.
+- `PgMemory` (Postgres + pgvector, per-tenant row-level security, needs the `postgresql` extra) is the shared, multi-tenant option. It treats the first namespace element as the tenant, so put the tenant id first in `namespace_prefix`, and its `search()` ranks by meaning only when you pass it an `embedder` — without one, ranking is lexical/associative token matching.
+- `OracleStore` (Oracle Database 26ai, native `VECTOR` + JSON columns, needs the `oracledb` extra) keeps memories next to the rest of your Oracle data; see [Oracle Database 26ai](#oracle-database-26ai-oraclestore-and-oracleagentmemorymanager) below.
 
 At session start `LLMMemoryManager` passes the text of the current user
 turn to the store as the `query`, so what gets injected depends on how
-the store's `search()` answers it. `PgMemory` ranks the stored memories
-against the turn — semantically with an `embedder`, by token matching
-without one — and `HolographicStore` ranks too (HRR associative
-similarity when numpy is installed, FTS5 lexical match otherwise). The
-ranked matches are then topped up with the most recently updated
+the store's `search()` answers it:
+
+- `PgMemory` ranks the stored memories against the turn — semantically with an `embedder`, by token matching without one.
+- `HolographicStore` ranks too (HRR associative similarity when numpy is installed, FTS5 lexical match otherwise).
+
+The ranked matches are then topped up with the most recently updated
 memories; the top-up is what covers `InMemoryStore` and `OracleStore`,
 whose `search()` only filters by substring, and any store that cannot
 search at all. [Context bloat vs. recall](#context-bloat-vs-recall)
-spells out the contract. `HolographicStore`, `PgMemory` and
+spells out the contract.
+
+`HolographicStore`, `PgMemory` and
 `OracleStore` live in
 [`locus.memory.store_backends`](../api/memory.md#durable-store-backends).
 For any other backend, subclass `BaseStore` (or use `Mem0MemoryManager`).
@@ -403,15 +397,17 @@ manager = LLMMemoryManager(store=store, retrieve_limit=8)
 `max_memories` (default 50 per type) bounds what is kept at all:
 `save()` deletes a type's oldest records beyond it.
 
-Recall runs in two passes. With a `query`, `retrieve()` first asks the
-store to rank each type's memories against it
-(`BaseStore.search(namespace, query=...)` — semantic on `PgMemory` with
-an `embedder`, lexical/associative on `HolographicStore`) and
-interleaves the best matches of every type; it then tops the list up
-with the most recently updated memories. The top-up is what keeps a
+Recall runs in two passes:
+
+1. With a `query`, `retrieve()` first asks the store to rank each type's memories against it (`BaseStore.search(namespace, query=...)` — semantic on `PgMemory` with an `embedder`, lexical/associative on `HolographicStore`) and interleaves the best matches of every type.
+2. It then tops the list up with the most recently updated memories.
+
+The top-up is what keeps a
 store whose `search()` only filters (`InMemoryStore`, `OracleStore`)
 from injecting nothing when no memory contains the whole user message,
-and a store that cannot search at all falls back to recency. Ranking
+and a store that cannot search at all falls back to recency.
+
+Ranking
 goes through `search()` with the query text — `PgMemory` embeds it for
 you. The only shipped store that implements `search_by_embedding()` is
 `OracleStore` (when constructed with a `dimension`), and the built-in
