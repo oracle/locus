@@ -29,6 +29,9 @@ policy.
 - **The documentation reads in short paragraphs.** A formatting pass over the
   docs pages: prose that ran past a screen became short paragraphs, lists and
   tables, with every fact, snippet and link kept. Nothing was added or removed.
+  The docs tests now fail on a prose paragraph over 90 words, so a page cannot
+  drift back; the one summary written as a single paragraph on purpose is
+  named in the test.
 
 ## [6.6.2] - 2026-11-25
 
