@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.6.2] - 2026-11-25
+
 ### Fixed
 
 - **An empty synthesis is a failed dispatch.** `SynthesizedPipelineRunnable`
