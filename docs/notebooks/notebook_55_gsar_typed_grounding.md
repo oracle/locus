@@ -50,18 +50,13 @@ What this notebook covers:
   `response_format` constrained decoding and falls back to its safe default,
   which abstains, when the reply does not parse.
 
-The drawing follows the loop that `example_outer_loop` runs through
-`GSAREvaluator.evaluate`. The Transport Layer Security (TLS) report and its
-evidence corpus (two scanner rows and a fired detection) go to the judge,
-which partitions the claims into the four buckets; the partition is scored
-and `S` is compared with the two thresholds. `proceed` ends the loop with the
-final report, and `regenerate` rewrites the synthesis from the same evidence
-and returns to the judge. `replan`, or a judge that abstains, goes to the
-budget check: while fewer than `K_max` replans have been spent, `replan_fn`
-is asked for a new synthesis and evidence corpus; otherwise the loop ends
-with the result flagged degraded. Parts 1 to 4 call the score and decide
-steps in the middle of the drawing directly, through `ground_finding`,
-`gsar_score` and `decide`:
+The drawing follows the loop that `example_outer_loop` runs through `GSAREvaluator.evaluate`. The Transport Layer Security (TLS) report and its evidence corpus (two scanner rows and a fired detection) go to the judge, which partitions the claims into the four buckets; the partition is scored and `S` is compared with the two thresholds:
+
+- `proceed` ends the loop with the final report.
+- `regenerate` rewrites the synthesis from the same evidence and returns to the judge.
+- `replan`, or a judge that abstains, goes to the budget check: while fewer than `K_max` replans have been spent, `replan_fn` is asked for a new synthesis and evidence corpus; otherwise the loop ends with the result flagged degraded.
+
+Parts 1 to 4 call the score and decide steps in the middle of the drawing directly, through `ground_finding`, `gsar_score` and `decide`:
 
 {{ locus_diagram gsar-decision }}
 
@@ -104,17 +99,11 @@ used, the `degraded` flag and the per-iteration trajectory, and only a
 python examples/notebook_55_gsar_typed_grounding.py
 ```
 
-Model choice comes from `examples/config.py`: OCI Generative AI when
-`~/.oci/config` has a usable profile, otherwise the bundled mock model, so the
-example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
-(`oci`, `openai`, `anthropic` or `mock`) to force one. `ground_finding` and
-the scoring layer are pure Python, so the admit and withhold decisions in
-Parts 1 to 4 are deterministic and identical across providers. Only the judge
-in Part 5 calls a model. The mock model answers in prose rather than the JSON
-the judge requests, so the judge falls back to its safe default (`abstain`,
-`S = 0.5`) on every round; the loop spends its replan budget and returns a
-degraded result rather than an ungrounded finding, which is the contract the
-evaluator exists to keep.
+Model choice comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile, otherwise the bundled mock model, so the example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to force one.
+
+`ground_finding` and the scoring layer are pure Python, so the admit and withhold decisions in Parts 1 to 4 are deterministic and identical across providers. Only the judge in Part 5 calls a model.
+
+The mock model answers in prose rather than the JSON the judge requests, so the judge falls back to its safe default (`abstain`, `S = 0.5`) on every round; the loop spends its replan budget and returns a degraded result rather than an ungrounded finding, which is the contract the evaluator exists to keep.
 
 To run offline regardless of what `~/.oci/config` holds:
 

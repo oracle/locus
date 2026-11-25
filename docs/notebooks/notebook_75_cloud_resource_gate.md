@@ -7,31 +7,21 @@ principal administrative rights over your account. The model deciding *what*
 to do is not the place to enforce *whether* it is allowed to. That belongs in
 code that runs before the API call.
 
-This example puts `admit()` in front of every cloud mutation. The agent
-proposes an `Action`; the gate weighs it against a `ControlPolicy` you wrote;
-the actual cloud call (here a local stub) fires only if the policy admits it.
-Small, contained changes proceed on their own. Anything that touches a
-production resource, grants Identity and Access Management (IAM) permissions,
-or touches more than one resource at once is held for a human. Either way the
-decision lands on a hash-chained `AuditTrail`, so there is no unrecorded path
-to a side effect.
+This example puts `admit()` in front of every cloud mutation. The agent proposes an `Action`; the gate weighs it against a `ControlPolicy` you wrote; the actual cloud call (here a local stub) fires only if the policy admits it.
 
-`admit()` is the single enforcement point. It asks the policy through
-`approve()`, records the decision on the `AuditTrail` whether or not it allows,
-and only then awaits `perform`; a hold surfaces as an `AdmissionError` that
-carries the decision and its reason, and the cloud call never fires. The
-script runs three proposals through it. Resizing a staging continuous
-integration (CI) runner clears on blast radius 1 with no restricted label, and
-the in-memory inventory shows the new instance size. Terminating the
-production primary database is held by the `production` label, and the row is
-left exactly as it was. Granting a deploy service account a new IAM permission
-is held by the `iam` label, although it is a staging change of blast radius 1.
-A model that is jailbroken, prompt-injected or simply mistaken still cannot
-push the held changes past the gate. Each side effect is a local stub that
-edits an in-memory `INVENTORY` or `IAM` dict instead of calling a cloud
-provider's SDK, so the script runs offline with no cloud account, no
-credentials and no network; swap those functions for real API calls and the
-gate is unchanged.
+Small, contained changes proceed on their own. Anything that touches a production resource, grants Identity and Access Management (IAM) permissions, or touches more than one resource at once is held for a human. Either way the decision lands on a hash-chained `AuditTrail`, so there is no unrecorded path to a side effect.
+
+`admit()` is the single enforcement point. It asks the policy through `approve()`, records the decision on the `AuditTrail` whether or not it allows, and only then awaits `perform`; a hold surfaces as an `AdmissionError` that carries the decision and its reason, and the cloud call never fires.
+
+The script runs three proposals through it:
+
+- Resizing a staging continuous integration (CI) runner clears on blast radius 1 with no restricted label, and the in-memory inventory shows the new instance size.
+- Terminating the production primary database is held by the `production` label, and the row is left exactly as it was.
+- Granting a deploy service account a new IAM permission is held by the `iam` label, although it is a staging change of blast radius 1.
+
+A model that is jailbroken, prompt-injected or simply mistaken still cannot push the held changes past the gate.
+
+Each side effect is a local stub that edits an in-memory `INVENTORY` or `IAM` dict instead of calling a cloud provider's SDK, so the script runs offline with no cloud account, no credentials and no network; swap those functions for real API calls and the gate is unchanged.
 
 What this notebook covers:
 

@@ -74,14 +74,11 @@ When to use `AgentServer` vs `A2AServer`:
   makes `GET /threads/{thread_id}` survive a restart.
 
 Every request the smoke test sends follows the path in the drawing:
-`GET /health` answers without a token; every other route sits behind the
-bearer check (the example passes no `api_key`, so unless
-`LOCUS_SERVER_API_KEY` is set there is no token check and every caller is
-the principal `anon`); `POST /invoke` and `POST /stream` run the triage
-agent, which loads and saves the incident thread in the Redis checkpointer
-under `principal:thread_id` when the request names a `thread_id`; and
-`GET` and `DELETE /threads/{thread_id}` read or drop that stored state
-directly, without running the agent:
+
+- `GET /health` answers without a token.
+- Every other route sits behind the bearer check (the example passes no `api_key`, so unless `LOCUS_SERVER_API_KEY` is set there is no token check and every caller is the principal `anon`).
+- `POST /invoke` and `POST /stream` run the triage agent, which loads and saves the incident thread in the Redis checkpointer under `principal:thread_id` when the request names a `thread_id`.
+- `GET` and `DELETE /threads/{thread_id}` read or drop that stored state directly, without running the agent.
 
 {{ locus_diagram server-request-flow }}
 
@@ -99,28 +96,26 @@ the smoke test and the live boot share it:
 
 {{ locus_source examples/notebook_65_agent_server.py::_build_server }}
 
-`example_server` drives the routes through FastAPI's `TestClient` without
-binding a port: `/health`, an `/invoke` with an explicit per-incident
-`thread_id`, a `/stream`, the read-back on `GET /threads/inc-4711`, a 404
-for a thread never opened and an idempotent `DELETE`. The client is opened
-with `with`, so the event loop it runs the app on outlives each request —
-which is what a run started in the background needs. The hint it prints
-last applies to keyed deployments that share one checkpointer: on one
-server, a token other than the configured key is answered with a 401, so
-a second engineer with a second key needs a second keyed instance:
+`example_server` drives the routes through FastAPI's `TestClient` without binding a port:
+
+- `/health`
+- an `/invoke` with an explicit per-incident `thread_id`
+- a `/stream`
+- the read-back on `GET /threads/inc-4711`
+- a 404 for a thread never opened
+- an idempotent `DELETE`
+
+The client is opened with `with`, so the event loop it runs the app on outlives each request — which is what a run started in the background needs.
+
+The hint it prints last applies to keyed deployments that share one checkpointer: on one server, a token other than the configured key is answered with a 401, so a second engineer with a second key needs a second keyed instance:
 
 {{ locus_source examples/notebook_65_agent_server.py::example_server }}
 
-`_show_resumable_run` is the part `/stream` cannot do. It starts a turn
-with `POST /threads/inc-4712/runs`, which answers at once with a run id,
-follows the run on `GET /runs/{run_id}/events` — every frame carries an
-`id:` line with the event's sequence number — keeps the first two frames
-as a client whose connection dropped would, and reconnects with
-`Last-Event-ID` set to the last id it saw: the server replays exactly the
-events after it, once, and ends with `[DONE]`. `GET /runs/{run_id}` then
-shows the run's status and `GET /threads/inc-4712` lists the run under the
-incident. The history behind the replay is bounded; the
-[concept page](../concepts/server.md#threads-and-runs) gives the limits:
+`_show_resumable_run` is the part `/stream` cannot do. It starts a turn with `POST /threads/inc-4712/runs`, which answers at once with a run id, and follows the run on `GET /runs/{run_id}/events` — every frame carries an `id:` line with the event's sequence number.
+
+It keeps the first two frames as a client whose connection dropped would, and reconnects with `Last-Event-ID` set to the last id it saw: the server replays exactly the events after it, once, and ends with `[DONE]`.
+
+`GET /runs/{run_id}` then shows the run's status and `GET /threads/inc-4712` lists the run under the incident. The history behind the replay is bounded; the [concept page](../concepts/server.md#threads-and-runs) gives the limits:
 
 {{ locus_source examples/notebook_65_agent_server.py::_show_resumable_run }}
 

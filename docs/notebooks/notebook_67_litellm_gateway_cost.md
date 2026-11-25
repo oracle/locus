@@ -53,16 +53,9 @@ docker compose -f examples/litellm-gateway/docker-compose.yml up -d
 export LITELLM_GATEWAY_URL="http://localhost:4000"
 ```
 
-The drawing is shared with the LiteLLM AI Gateway notebook, so it accents
-the agent. The callers in this notebook are the "Other services"
-box above it in the "Your services" lane: plain OpenAI-shaped requests
-from `httpx` that carry only a team's virtual key. The element to look at
-is the Postgres store beneath the gateway. The gateway resolves the
-`gpt-4o` alias through `model_list` in `config.yaml`, calls the provider
-with keys that only it holds, and records the cost of every request
-against the key that made it; that store is what `/spend/logs`,
-`/global/spend/keys` and `/global/spend/models` read, and the gateway
-enforces each key's `max_budget` against the spend recorded there:
+The drawing is shared with the LiteLLM AI Gateway notebook, so it accents the agent. The callers in this notebook are the "Other services" box above it in the "Your services" lane: plain OpenAI-shaped requests from `httpx` that carry only a team's virtual key.
+
+The element to look at is the Postgres store beneath the gateway. The gateway resolves the `gpt-4o` alias through `model_list` in `config.yaml`, calls the provider with keys that only it holds, and records the cost of every request against the key that made it; that store is what `/spend/logs`, `/global/spend/keys` and `/global/spend/models` read, and the gateway enforces each key's `max_budget` against the spend recorded there:
 
 {{ locus_diagram litellm-gateway }}
 
@@ -97,16 +90,11 @@ helper:
 python examples/notebook_67_litellm_gateway_cost.py
 ```
 
-The script talks to a running LiteLLM AI Gateway over HTTP with `httpx`
-and does not use the shared `examples/config.py` harness or any model class, so `LOCUS_MODEL_PROVIDER` plays no part and there is no mock
-fallback. It reads `LITELLM_GATEWAY_URL` and `LITELLM_MASTER_KEY` from the
-Prerequisites; the master key is required because `/key/generate` and the
-spend endpoints are admin calls. The upstream provider keys are read by
-the gateway container, never by this script. If either variable is
-missing, the script prints the wiring snippet and exits cleanly with
-status 0. With both set, it issues the two keys, drives five chat
-completions, waits fifteen seconds for the gateway's asynchronous spend
-logger to flush, and then prints the three spend views.
+The script talks to a running LiteLLM AI Gateway over HTTP with `httpx` and does not use the shared `examples/config.py` harness or any model class, so `LOCUS_MODEL_PROVIDER` plays no part and there is no mock fallback. It reads `LITELLM_GATEWAY_URL` and `LITELLM_MASTER_KEY` from the Prerequisites; the master key is required because `/key/generate` and the spend endpoints are admin calls.
+
+The upstream provider keys are read by the gateway container, never by this script. If either variable is missing, the script prints the wiring snippet and exits cleanly with status 0.
+
+With both set, it issues the two keys, drives five chat completions, waits fifteen seconds for the gateway's asynchronous spend logger to flush, and then prints the three spend views.
 
 ## See also
 

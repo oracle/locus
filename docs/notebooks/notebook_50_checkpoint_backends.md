@@ -1,21 +1,11 @@
 # Checkpoint backends
 
-A customer-support case runs for days and survives restarts, shift
-handoffs and redeploys only if its conversation state lives outside any
-one process. This notebook first drives the
-[time-travel surface](../concepts/checkpointers.md#time-travel) every
-checkpointer has — `list`, `fork`, and `run(..., from_checkpoint=...)` —
-on the in-memory checkpointer, which needs no credentials, and then the
-checkpointer contract by hand against `S3Backend`, which keeps every
-checkpoint as objects under one bucket prefix: here OCI Object Storage
-through its S3-compatible API, and with the same code S3, MinIO or
-Cloudflare R2, all via boto3.
-(`OCIBucketBackend` keeps the same object layout and reports the same
-capabilities over the OCI Python SDK; it signs with an OCI configuration
-profile, a session token or an instance or resource principal instead of
-the Customer Secret Key pair the S3-compatible API uses.) The
-[conversation memory](notebook_05_agent_memory.md) notebook covers the
-checkpointer contract itself.
+A customer-support case runs for days and survives restarts, shift handoffs and redeploys only if its conversation state lives outside any one process. This notebook runs in two steps:
+
+- It first drives the [time-travel surface](../concepts/checkpointers.md#time-travel) every checkpointer has — `list`, `fork`, and `run(..., from_checkpoint=...)` — on the in-memory checkpointer, which needs no credentials.
+- It then drives the checkpointer contract by hand against `S3Backend`, which keeps every checkpoint as objects under one bucket prefix: here OCI Object Storage through its S3-compatible API, and with the same code S3, MinIO or Cloudflare R2, all via boto3.
+
+(`OCIBucketBackend` keeps the same object layout and reports the same capabilities over the OCI Python SDK; it signs with an OCI configuration profile, a session token or an instance or resource principal instead of the Customer Secret Key pair the S3-compatible API uses.) The [conversation memory](notebook_05_agent_memory.md) notebook covers the checkpointer contract itself.
 
 The in-memory checkpointer covered there is the developer default;
 object storage is the

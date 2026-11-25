@@ -19,15 +19,15 @@ demonstrates control flow; it is not evidence of live-model or vendor behavior.
 <div markdown="block"><dt>Source format</dt><dd markdown="span">Self-contained Python files under `examples/`</dd></div>
 </dl>
 
-These examples build agents with typed tools, memory, streaming, graphs, RAG,
-multi-agent shapes, and the provider and gateway matrix, on everyday work in
-payments, customer support, infrastructure, and privacy. Many examples put a
-gate you wrote in front of a consequential action: a hook that cancels the tool
-call, a graph interrupt that waits for a person, or `admit()` checking a
-`ControlPolicy`. The [control-layer examples](#control-layer-and-security) also
-record every decision, allowed or held, on a tamper-evident audit trail.
-The tracks below work through those domains; one dedicated track applies that
-gate to security operations.
+These examples build agents with typed tools, memory, streaming, graphs, RAG, multi-agent shapes, and the provider and gateway matrix, on everyday work in payments, customer support, infrastructure, and privacy.
+
+Many examples put a gate you wrote in front of a consequential action:
+
+- a hook that cancels the tool call
+- a graph interrupt that waits for a person
+- `admit()` checking a `ControlPolicy`
+
+The [control-layer examples](#control-layer-and-security) also record every decision, allowed or held, on a tamper-evident audit trail. The tracks below work through those domains; one dedicated track applies that gate to security operations.
 
 Run any example:
 

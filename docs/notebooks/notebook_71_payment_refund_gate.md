@@ -12,16 +12,9 @@ the refund still only goes through if the `ControlPolicy` admits it, and every
 decision — the paid refund and the held one — lands on a tamper-evident
 `AuditTrail`.
 
-Each proposed refund becomes an `Action` with two policy-visible attributes:
-how many ledger entries it touches (`blast_radius`) and whether its dollar
-amount crosses the human-review line (a `high_value` tag). The policy
-auto-allows a single-ledger-entry refund that carries no `high_value` tag and
-holds anything bigger. In the script, the small refund (one ledger entry,
-$12.50) is paid automatically, while the large one ($4,000 reversing a
-six-charge subscription batch) trips *both* rules — the blast radius exceeds
-`max_blast_radius` and the `high_value` tag is in `require_human_for` — so it
-raises an `AdmissionError(require_human)`, the payout never runs, and the
-script records the hold for a human approver.
+Each proposed refund becomes an `Action` with two policy-visible attributes: how many ledger entries it touches (`blast_radius`) and whether its dollar amount crosses the human-review line (a `high_value` tag). The policy auto-allows a single-ledger-entry refund that carries no `high_value` tag and holds anything bigger.
+
+In the script, the small refund (one ledger entry, $12.50) is paid automatically, while the large one ($4,000 reversing a six-charge subscription batch) trips *both* rules — the blast radius exceeds `max_blast_radius` and the `high_value` tag is in `require_human_for` — so it raises an `AdmissionError(require_human)`, the payout never runs, and the script records the hold for a human approver.
 
 What this notebook covers:
 
@@ -47,15 +40,9 @@ What this notebook covers:
   it as evidence — see
   [what `verify()` catches](../api/control.md#what-verify-catches-and-the-one-thing-it-cannot).
 
-The drawing is the [control layer](../concepts/control-layer.md) as a gated
-tool call traverses it; this notebook walks its central path by hand.
-`refund_action()` builds the `Action` the gate would otherwise derive from the
-agent's call, and `admit()` weighs it against the `ControlPolicy` and records
-the decision on the `AuditTrail` before anything moves. On allow the
-`pay_out()` side effect runs; a hold surfaces as an `AdmissionError` rather
-than landing in an approval store, because the script sets up no interrupting
-gate and no store. The agent loop, checkpointer and grounding in the drawing
-play no part here:
+The drawing is the [control layer](../concepts/control-layer.md) as a gated tool call traverses it; this notebook walks its central path by hand. `refund_action()` builds the `Action` the gate would otherwise derive from the agent's call, and `admit()` weighs it against the `ControlPolicy` and records the decision on the `AuditTrail` before anything moves.
+
+On allow the `pay_out()` side effect runs; a hold surfaces as an `AdmissionError` rather than landing in an approval store, because the script sets up no interrupting gate and no store. The agent loop, checkpointer and grounding in the drawing play no part here:
 
 {{ locus_diagram control-layer-flow }}
 

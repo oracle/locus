@@ -8,32 +8,20 @@ agent and the datastore: the reversible export clears the gate on its own, the
 irreversible erasure stops and waits for the Data Protection Officer (DPO),
 and every decision lands on one hash-chained `AuditTrail`.
 
-The decision of whether the data is deleted does not live in the agent's
-prompt. Two fields on one `ControlPolicy` carry it:
-`require_human_for={"irreversible"}` holds any action whose labels include the
-`irreversible` tag, however few records it touches, and `max_blast_radius=5`
-holds any action whose `blast_radius` is above five — here the number of data
-categories a request touches. `require_verification_score=0.0` switches the
-verification check off, because a data-subject request is a compliance action
-with no threat verdict to weigh. `admit()` asks the policy, records the
-decision on the trail whether or not it allows, and only then awaits
-`perform`, so an agent that is confused, prompt-injected or wrong about which
-request it is processing still cannot delete a record on its own authority.
+The decision of whether the data is deleted does not live in the agent's prompt. Two fields on one `ControlPolicy` carry it:
 
-After the hold a stub stands in for the DPO resolving the ticket, and the
-erasure is re-admitted under a second policy whose `require_human_for` is
-empty. It lands on the same trail, so the record shows the allowed export, the
-held erasure and the erasure that ran only after sign-off. That third record
-is a plain `allow` and does not name the approver; re-admitting the held
-action under the original policy with `admit(..., approved_by="dpo:alice@corp")`
-runs it instead and writes a record that keeps the `require_human` outcome and
-gains an `approved_by` field. `trail.verify()` confirms the SHA-256 chain is
-internally consistent: an edited or reordered record, or one deleted from the
-middle, returns `False`. A bare call cannot catch records dropped off the end
-or a chain re-hashed from an edited record onward, so keep `trail.head` where
-the agent cannot reach it and pass it back as `verify(expected_head=...)`
-before treating the trail as evidence — see
-[what `verify()` catches](../api/control.md#what-verify-catches-and-the-one-thing-it-cannot).
+- `require_human_for={"irreversible"}` holds any action whose labels include the `irreversible` tag, however few records it touches.
+- `max_blast_radius=5` holds any action whose `blast_radius` is above five — here the number of data categories a request touches.
+
+`require_verification_score=0.0` switches the verification check off, because a data-subject request is a compliance action with no threat verdict to weigh.
+
+`admit()` asks the policy, records the decision on the trail whether or not it allows, and only then awaits `perform`, so an agent that is confused, prompt-injected or wrong about which request it is processing still cannot delete a record on its own authority.
+
+After the hold a stub stands in for the DPO resolving the ticket, and the erasure is re-admitted under a second policy whose `require_human_for` is empty. It lands on the same trail, so the record shows the allowed export, the held erasure and the erasure that ran only after sign-off.
+
+That third record is a plain `allow` and does not name the approver; re-admitting the held action under the original policy with `admit(..., approved_by="dpo:alice@corp")` runs it instead and writes a record that keeps the `require_human` outcome and gains an `approved_by` field.
+
+`trail.verify()` confirms the SHA-256 chain is internally consistent: an edited or reordered record, or one deleted from the middle, returns `False`. A bare call cannot catch records dropped off the end or a chain re-hashed from an edited record onward, so keep `trail.head` where the agent cannot reach it and pass it back as `verify(expected_head=...)` before treating the trail as evidence — see [what `verify()` catches](../api/control.md#what-verify-catches-and-the-one-thing-it-cannot).
 
 What this notebook covers:
 
@@ -46,14 +34,13 @@ What this notebook covers:
 - `trail.verify()`: what a bare call proves about the SHA-256 chain and what
   `expected_head` adds.
 
-The drawing follows both requests through the gate: `admit()` hands each
-`Action` to `approve()` with the policy; the Article 15/20 export carries no
-label in `require_human_for` and its blast radius of 4 is within the cap of 5,
-so it is allowed and `perform()` runs it; the Article 17 erasure is held
-because its `irreversible` tag is in `require_human_for`, and nothing is
-deleted; once the DPO signs off, the erasure is re-admitted under a policy
-whose `require_human_for` is empty; and each decision is recorded on the same
-`AuditTrail` before its side effect runs:
+The drawing follows both requests through the gate:
+
+- `admit()` hands each `Action` to `approve()` with the policy.
+- The Article 15/20 export carries no label in `require_human_for` and its blast radius of 4 is within the cap of 5, so it is allowed and `perform()` runs it.
+- The Article 17 erasure is held because its `irreversible` tag is in `require_human_for`, and nothing is deleted.
+- Once the DPO signs off, the erasure is re-admitted under a policy whose `require_human_for` is empty.
+- Each decision is recorded on the same `AuditTrail` before its side effect runs.
 
 {{ locus_diagram gate-data-deletion }}
 

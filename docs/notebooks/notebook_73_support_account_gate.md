@@ -8,13 +8,9 @@ real money and changes what the customer is entitled to; those should wait for
 a support lead before anything is written — and the wait has to outlive the
 process that started it.
 
-This example places that decision in `admit()`, a gate that runs before the
-account is touched, rather than in the agent's prompt. The agent can be
-confused, jailbroken or persuaded to issue a $500 credit; the change still goes
-through only if the `ControlPolicy` admits it, and the applied credit and the
-held upgrade both land on a hash-chained `AuditTrail`. The account write itself
-is a local stub that mutates an in-memory dict, so the script runs offline;
-replacing it with a call to the billing API leaves the gate unchanged.
+This example places that decision in `admit()`, a gate that runs before the account is touched, rather than in the agent's prompt. The agent can be confused, jailbroken or persuaded to issue a $500 credit; the change still goes through only if the `ControlPolicy` admits it, and the applied credit and the held upgrade both land on a hash-chained `AuditTrail`.
+
+The account write itself is a local stub that mutates an in-memory dict, so the script runs offline; replacing it with a call to the billing API leaves the gate unchanged.
 
 What this notebook covers:
 

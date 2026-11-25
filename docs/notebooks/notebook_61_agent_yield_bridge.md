@@ -1,14 +1,10 @@
 # Agent yield bridge
 
-`Agent.run` is decorated with `@_bus_bridge`, so whenever a `run_context`
-is open each yielded event the bridge recognises is also published on the
-`EventBus` as an `agent.*` event. No hook registration or configuration
-flag is required: the decorator is always present, and `emit()` returns
-at once when no run id is bound, so an agent that runs outside
-`run_context` publishes nothing through the bridge. The scenario is a
-data-privacy review agent, whose tool calls are the part data protection
-officers (DPOs) and auditors care about most: each inspection the
-reviewer performs appears in the run stream as a tool span.
+`Agent.run` is decorated with `@_bus_bridge`, so whenever a `run_context` is open each yielded event the bridge recognises is also published on the `EventBus` as an `agent.*` event.
+
+No hook registration or configuration flag is required: the decorator is always present, and `emit()` returns at once when no run id is bound, so an agent that runs outside `run_context` publishes nothing through the bridge.
+
+The scenario is a data-privacy review agent, whose tool calls are the part data protection officers (DPOs) and auditors care about most: each inspection the reviewer performs appears in the run stream as a tool span.
 
 The bridge recognises ten `LocusEvent` classes and maps each to a
 canonical `agent.*` event type (`ModelCompleteEvent` to two). The

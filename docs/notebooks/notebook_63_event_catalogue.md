@@ -1,15 +1,8 @@
 # Event catalogue
 
-When a Payment Card Industry Data Security Standard (PCI DSS) assessor
-asks "what can your payment agents do, and how would you know they did
-it?", the answer is the event catalogue, generated from the code itself
-rather than from a spreadsheet that drifts out of date. SDK components
-emit typed events under a stable prefix per subsystem, and most of the
-names are declared as `EV_*` constants in `locus.observability.emit`, so
-changing a constant propagates to every emission site that imports it.
-The constants span thirteen prefixes: `agent.*`, `multiagent.*`,
-`composition.*`, `rag.*`, `memory.*`, `a2a.*`, `skills.*`,
-`deepagent.*`, `research.*`, `model.*`, `tool.*`, `control.*` and `harness.*`.
+When a Payment Card Industry Data Security Standard (PCI DSS) assessor asks "what can your payment agents do, and how would you know they did it?", the answer is the event catalogue, generated from the code itself rather than from a spreadsheet that drifts out of date.
+
+SDK components emit typed events under a stable prefix per subsystem, and most of the names are declared as `EV_*` constants in `locus.observability.emit`, so changing a constant propagates to every emission site that imports it. The constants span thirteen prefixes: `agent.*`, `multiagent.*`, `composition.*`, `rag.*`, `memory.*`, `a2a.*`, `skills.*`, `deepagent.*`, `research.*`, `model.*`, `tool.*`, `control.*` and `harness.*`.
 
 Prefix map, with the component that emits each family:
 
@@ -29,20 +22,12 @@ Prefix map, with the component that emits each family:
 | `control.*` | The `ToolCallJudge` verdict on a proposed tool call |
 | `harness.*` | Coding harness (`locus.harness`) command execution records |
 
-Two qualifications matter when the catalogue is handed to an assessor.
-The `router.*` events are not in the registry: the helpers in
-`locus.observability.router_events` publish them as string literals
-under the run id that `Router.dispatch` binds, so they do not appear in
-the printed list. And the registry is neither a superset nor a subset of
-what the code publishes. `memory.conversation.added` was declared but
-never emitted and is deprecated, and `agent.model.completed` is mapped
-from a `ModelCompleteEvent` that `Agent.run()` never yields. In the
-other direction, `EventBusHook` and
-the long-term memory managers publish some names as string literals,
-several of them (`agent.invocation.*`, `agent.iteration.*`,
-`agent.model.started`, `memory.manager.extract_failed`) with no
-constant at all. The catalogue is the naming contract the code
-declares, not a record of what a run emitted.
+Two qualifications matter when the catalogue is handed to an assessor:
+
+- The `router.*` events are not in the registry: the helpers in `locus.observability.router_events` publish them as string literals under the run id that `Router.dispatch` binds, so they do not appear in the printed list.
+- The registry is neither a superset nor a subset of what the code publishes. `memory.conversation.added` was declared but never emitted and is deprecated, and `agent.model.completed` is mapped from a `ModelCompleteEvent` that `Agent.run()` never yields. In the other direction, `EventBusHook` and the long-term memory managers publish some names as string literals, several of them (`agent.invocation.*`, `agent.iteration.*`, `agent.model.started`, `memory.manager.extract_failed`) with no constant at all.
+
+The catalogue is the naming contract the code declares, not a record of what a run emitted.
 
 What this notebook covers:
 
