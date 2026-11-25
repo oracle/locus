@@ -8,42 +8,25 @@ every change stops releases altogether. The middle path is a gate: cheap,
 reversible staging changes go through automatically, and any change to the
 production environment stops and waits for a human.
 
-The decision of *whether the rollout runs* does not live in the agent's prompt.
-It lives in `admit()`, a gate that runs before `kubectl` (the Kubernetes
-command-line tool) touches the cluster, and the rule it enforces is written
-once, in a `ControlPolicy`: any action carrying the `production` label waits
-for a person, however small its blast radius; staging clears on blast radius
-alone; and the verification bar is switched off, because a deploy is an
-operations action with no security verdict to weigh. The agent can be confused,
-manipulated by a prompt injection, or wrong about the blast radius it declares;
-a production change still waits for a human, and nothing runs that `admit()`
-has not cleared.
+The decision of *whether the rollout runs* does not live in the agent's prompt. It lives in `admit()`, a gate that runs before `kubectl` (the Kubernetes command-line tool) touches the cluster, and the rule it enforces is written once, in a `ControlPolicy`:
 
-`admit()` is the single enforcement point. It asks the policy through
-`approve()`, records the decision on the `AuditTrail` whether or not it allows
-the action, and only then awaits `perform`; a hold surfaces as an
-`AdmissionError` that carries the decision, and a later `admit()` call with
-`approved_by=` runs the held action and records the approver on the trail. The
-rollout itself is a local stub that appends to an in-memory list instead of
-calling `kubectl`, so the script runs offline with no cluster, no credentials
-and no network; swap that one function for a real `kubectl rollout` call and
-the gate is unchanged.
+- any action carrying the `production` label waits for a person, however small its blast radius
+- staging clears on blast radius alone
+- the verification bar is switched off, because a deploy is an operations action with no security verdict to weigh
 
-An optional third part adds a second check that reads the call. The policy
-weighs labels, and labels are all it can see: a staging rollout pinned to
-`checkout-api:1.8.2` and one to the floating `checkout-api:latest` tag carry
-the same labels, so the gate allows both. A `ToolCallJudge` is handed to
-`gate_tool(..., judge=judge)` and shown the proposed call, the tool's name and
-its arguments, together with the intent written in words and a line of
-guidance for this tool; it returns `allow`, `hold` or `deny` with a reason. The
-verdict reaches `admit()` as evidence and can only tighten the decision: the
-pinned rollout clears, the `latest` rollout the policy had allowed is held, and
-a policy hold or deny would stand whatever the judge said. The judge model
-follows the series convention in `examples/config.py`: with no provider
-configured it is the SDK's scripted test double, so this part runs offline
-too; with `LOCUS_MODEL_PROVIDER` set it is the configured model, and its id is
-on the audit entries. On an agent it borrows the agent's model unless given
-its own.
+The agent can be confused, manipulated by a prompt injection, or wrong about the blast radius it declares; a production change still waits for a human, and nothing runs that `admit()` has not cleared.
+
+`admit()` is the single enforcement point. It asks the policy through `approve()`, records the decision on the `AuditTrail` whether or not it allows the action, and only then awaits `perform`; a hold surfaces as an `AdmissionError` that carries the decision, and a later `admit()` call with `approved_by=` runs the held action and records the approver on the trail.
+
+The rollout itself is a local stub that appends to an in-memory list instead of calling `kubectl`, so the script runs offline with no cluster, no credentials and no network; swap that one function for a real `kubectl rollout` call and the gate is unchanged.
+
+An optional third part adds a second check that reads the call. The policy weighs labels, and labels are all it can see: a staging rollout pinned to `checkout-api:1.8.2` and one to the floating `checkout-api:latest` tag carry the same labels, so the gate allows both.
+
+A `ToolCallJudge` is handed to `gate_tool(..., judge=judge)` and shown the proposed call, the tool's name and its arguments, together with the intent written in words and a line of guidance for this tool; it returns `allow`, `hold` or `deny` with a reason.
+
+The verdict reaches `admit()` as evidence and can only tighten the decision: the pinned rollout clears, the `latest` rollout the policy had allowed is held, and a policy hold or deny would stand whatever the judge said.
+
+The judge model follows the series convention in `examples/config.py`: with no provider configured it is the SDK's scripted test double, so this part runs offline too; with `LOCUS_MODEL_PROVIDER` set it is the configured model, and its id is on the audit entries. On an agent it borrows the agent's model unless given its own.
 
 What this notebook covers:
 

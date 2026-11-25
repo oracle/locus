@@ -69,14 +69,9 @@ notebook wraps in a WAV container for portability:
 python examples/notebook_59_audio_chat.py
 ```
 
-This notebook does not take its model from `examples/config.py` and has no
-OCI Generative AI path: it reads `LOCUS_MODEL_PROVIDER` and
-`OPENAI_API_KEY` itself, and the chat call always goes to OpenAI. With the
-variable unset or set to `mock`, or with no key, the script runs fully
-offline: nothing is sent, a question `.wav` not yet on disk is written as
-a placeholder tone, and the reply is a canned transcript plus a one-second
-simulated PCM-16 tone, so the question audio, the printed transcript and
-the written answer file can be checked before adding real credentials.
+This notebook does not take its model from `examples/config.py` and has no OCI Generative AI path: it reads `LOCUS_MODEL_PROVIDER` and `OPENAI_API_KEY` itself, and the chat call always goes to OpenAI.
+
+With the variable unset or set to `mock`, or with no key, the script runs fully offline: nothing is sent, a question `.wav` not yet on disk is written as a placeholder tone, and the reply is a canned transcript plus a one-second simulated PCM-16 tone, so the question audio, the printed transcript and the written answer file can be checked before adding real credentials.
 
 Both files are written next to the example: `examples/notebook_59_question.wav`
 on the first run and `examples/notebook_59_answer.wav` on every run; the

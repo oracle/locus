@@ -57,16 +57,9 @@ credentials never reach the agent host:
 
 ## Key lines
 
-`_run_agent` is the whole integration. `OpenAIModel` takes the gateway
-URL as `base_url`, the key from `LITELLM_GATEWAY_KEY` as `api_key` and
-the alias from `LITELLM_GATEWAY_MODEL` as `model`; because `base_url` is
-set, the default `api="auto"` sends every request to the gateway's
-chat-completions endpoint rather than the Responses API. The `Agent`
-built around it answers each prompt through `arun` and reports the prompt
-and completion token counts from `result.metrics`. The function holds no
-provider key, and the only provider name in it, the `OpenAIModel` class,
-refers to the gateway's OpenAI-shaped API; which upstream serves the alias
-is decided by `model_list` in `config.yaml`:
+`_run_agent` is the whole integration. `OpenAIModel` takes the gateway URL as `base_url`, the key from `LITELLM_GATEWAY_KEY` as `api_key` and the alias from `LITELLM_GATEWAY_MODEL` as `model`; because `base_url` is set, the default `api="auto"` sends every request to the gateway's chat-completions endpoint rather than the Responses API.
+
+The `Agent` built around it answers each prompt through `arun` and reports the prompt and completion token counts from `result.metrics`. The function holds no provider key, and the only provider name in it, the `OpenAIModel` class, refers to the gateway's OpenAI-shaped API; which upstream serves the alias is decided by `model_list` in `config.yaml`:
 
 {{ locus_source examples/notebook_66_litellm_gateway.py::_run_agent }}
 
@@ -86,16 +79,9 @@ gateway but the loop would report `[0 streamed chunks]`;
 python examples/notebook_66_litellm_gateway.py
 ```
 
-The script talks to a running LiteLLM AI Gateway and does not use the
-shared `examples/config.py` harness, so `LOCUS_MODEL_PROVIDER` plays no
-part and there is no mock fallback. It reads `LITELLM_GATEWAY_URL` and
-`LITELLM_GATEWAY_KEY` from the environment set under Prerequisites;
-`LITELLM_GATEWAY_MODEL` defaults to `gpt-4o`, the alias the sample
-`config.yaml` ships. The upstream provider keys are read by the gateway
-container, never by this script. If either required variable is missing,
-the script prints a short setup reminder and exits with status 0; if both
-are set but the gateway does not answer `GET /v1/models`, the health check
-reports the error and exits with status 1.
+The script talks to a running LiteLLM AI Gateway and does not use the shared `examples/config.py` harness, so `LOCUS_MODEL_PROVIDER` plays no part and there is no mock fallback. It reads `LITELLM_GATEWAY_URL` and `LITELLM_GATEWAY_KEY` from the environment set under Prerequisites; `LITELLM_GATEWAY_MODEL` defaults to `gpt-4o`, the alias the sample `config.yaml` ships.
+
+The upstream provider keys are read by the gateway container, never by this script. If either required variable is missing, the script prints a short setup reminder and exits with status 0; if both are set but the gateway does not answer `GET /v1/models`, the health check reports the error and exits with status 1.
 
 ## See also
 

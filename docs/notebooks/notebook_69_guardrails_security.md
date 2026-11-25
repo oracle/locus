@@ -9,17 +9,9 @@ exfiltrate case data or invoke a destructive tool. This example attaches
 refuses: dangerous input before the model sees it, and dangerous tool calls
 before they run.
 
-Part 4 is the showcase. Four sample results from a `search_intel` tool, three
-of them carrying a smuggled payload, go through `GuardrailsHook.on_after_tool_call`,
-which checks the result's length and scans it for personally identifiable
-information (PII), and then through `on_before_invocation`, where the
-SQL-injection, path-traversal and command-injection signatures fire. The
-example turns the first detection into a `Partition` of two grounded claims,
-and `ground_finding` scores it with Grounding-Stratified Adaptive Replanning
-([GSAR](../concepts/gsar.md)): the tool-output row that carried the instruction
-is the evidence, so an `Evidence` ships with its score, its evidence references
-and its taxonomy tags. An ungrounded claim would lower the score, and below the
-proceed threshold `ground_finding` returns an `Abstention` instead.
+Part 4 is the showcase. Four sample results from a `search_intel` tool, three of them carrying a smuggled payload, go through `GuardrailsHook.on_after_tool_call`, which checks the result's length and scans it for personally identifiable information (PII), and then through `on_before_invocation`, where the SQL-injection, path-traversal and command-injection signatures fire.
+
+The example turns the first detection into a `Partition` of two grounded claims, and `ground_finding` scores it with Grounding-Stratified Adaptive Replanning ([GSAR](../concepts/gsar.md)): the tool-output row that carried the instruction is the evidence, so an `Evidence` ships with its score, its evidence references and its taxonomy tags. An ungrounded claim would lower the score, and below the proceed threshold `ground_finding` returns an `Abstention` instead.
 
 Four parts attach a hook to a live agent run through `Agent(hooks=[...])`;
 Parts 3 to 7 call the hook methods directly on sample ticket text, tool output
@@ -45,16 +37,15 @@ What this notebook covers:
 - Secret-leakage filtering with `ContentFilterHook`, and stacked hooks through
   `HookRegistry`.
 
-The guardrails here are hooks: `on_before_invocation` scans the prompt,
-`on_after_tool_call` scans a tool's result, and `on_before_tool_call` refuses a
-tool on the block list, such as `exec` or `shell`, before it runs. The control
-layer drawn below is what a gated tool applies to the calls a hook lets through:
-the gate turns each one into an Action, `admit` decides it and records the
-decision on the audit trail, and the side effect runs, waits for approval or is
-denied. This example stops at the hooks and the `ground_finding` call, which
-applies the GSAR score to one security finding rather than to the agent's
-answer as the drawing's grounding step does; the gate, the audit trail, the
-approval store and the checkpointer in the drawing play no part here:
+The guardrails here are hooks:
+
+- `on_before_invocation` scans the prompt.
+- `on_after_tool_call` scans a tool's result.
+- `on_before_tool_call` refuses a tool on the block list, such as `exec` or `shell`, before it runs.
+
+The control layer drawn below is what a gated tool applies to the calls a hook lets through: the gate turns each one into an Action, `admit` decides it and records the decision on the audit trail, and the side effect runs, waits for approval or is denied.
+
+This example stops at the hooks and the `ground_finding` call, which applies the GSAR score to one security finding rather than to the agent's answer as the drawing's grounding step does; the gate, the audit trail, the approval store and the checkpointer in the drawing play no part here:
 
 {{ locus_diagram control-layer-flow }}
 

@@ -61,15 +61,9 @@ sent back to `parse`:
 
 {{ locus_source examples/notebook_79_contract_review.py::negotiate }}
 
-`_drive` runs the graph once, then resumes each negotiation interrupt with
-`Command(resume=...)` until `result.interrupt` is `None`. The graph has no
-checkpointer, so a resumed run starts from whatever the `Command` carries in
-`update`: `_drive` passes back the `final_state` the interrupted run
-returned, which includes the executor's resume marker and the model object
-that rides along in state, and sets `__model__` again explicitly. Counsel's
-answers are scripted: `main()` supplies two vendor redlines and then a
-RESOLVED answer, and `_drive` answers RESOLVED on its own if the list runs
-out, so the run completes without a prompt:
+`_drive` runs the graph once, then resumes each negotiation interrupt with `Command(resume=...)` until `result.interrupt` is `None`. The graph has no checkpointer, so a resumed run starts from whatever the `Command` carries in `update`: `_drive` passes back the `final_state` the interrupted run returned, which includes the executor's resume marker and the model object that rides along in state, and sets `__model__` again explicitly.
+
+Counsel's answers are scripted: `main()` supplies two vendor redlines and then a RESOLVED answer, and `_drive` answers RESOLVED on its own if the list runs out, so the run completes without a prompt:
 
 {{ locus_source examples/notebook_79_contract_review.py::_drive }}
 

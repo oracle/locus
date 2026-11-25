@@ -39,15 +39,9 @@ What this notebook covers:
 export OPENAI_API_KEY=sk-...
 ```
 
-In this notebook the ingest lane is only `add_documents()`: there is no
-loader, and each runbook string is shorter than the retriever's `chunk_size`
-(1000 characters by default), so `OpenAIEmbeddings` embeds it whole and the
-retriever writes it to the `InMemoryVectorStore`. The retrieve lane is the
-subject: ATLAS calls the search tool that `retriever.as_tool()` built, the
-tool runs `RAGRetriever.retrieve()`, which embeds the responder's question
-with the same embedder and searches the store, and because no reranker is
-configured the ranked chunks come back as they are, each with content, score
-and metadata, as the text the agent answers from:
+In this notebook the ingest lane is only `add_documents()`: there is no loader, and each runbook string is shorter than the retriever's `chunk_size` (1000 characters by default), so `OpenAIEmbeddings` embeds it whole and the retriever writes it to the `InMemoryVectorStore`.
+
+The retrieve lane is the subject: ATLAS calls the search tool that `retriever.as_tool()` built, the tool runs `RAGRetriever.retrieve()`, which embeds the responder's question with the same embedder and searches the store, and because no reranker is configured the ranked chunks come back as they are, each with content, score and metadata, as the text the agent answers from:
 
 {{ locus_diagram rag-pipeline }}
 

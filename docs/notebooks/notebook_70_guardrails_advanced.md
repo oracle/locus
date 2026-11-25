@@ -1,14 +1,8 @@
 # Trace hygiene
 
-An agent's replies are written somewhere durable: the investigation trace,
-the audit record, the ticket, the report. Each of those inherits whatever the
-model put in the reply — a reporter's email address, a phone number, content
-the model was manipulated into drafting. The `GuardrailsHook` of
-[notebook 69](notebook_69_guardrails_security.md) screens the prompt, the tool
-calls and their results; this notebook adds the output side. `OutputFilterHook`
-filters the model's reply inside the agent loop, so what the loop records and
-returns is already clean, and `TopicPolicy` and `ContentPolicy` give it
-declarative rules to apply.
+An agent's replies are written somewhere durable: the investigation trace, the audit record, the ticket, the report. Each of those inherits whatever the model put in the reply — a reporter's email address, a phone number, content the model was manipulated into drafting.
+
+The `GuardrailsHook` of [notebook 69](notebook_69_guardrails_security.md) screens the prompt, the tool calls and their results; this notebook adds the output side. `OutputFilterHook` filters the model's reply inside the agent loop, so what the loop records and returns is already clean, and `TopicPolicy` and `ContentPolicy` give it declarative rules to apply.
 
 The example runs an agent whose system prompt asks it to quote a contact
 address, with the hook redacting personally identifiable information (PII)

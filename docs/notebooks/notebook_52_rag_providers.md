@@ -64,17 +64,14 @@ Part 6 a chat model (`get_model()` from `examples/config.py`, so
 `LOCUS_MODEL_PROVIDER` / `LOCUS_MODEL_ID` apply); the parts say so and
 return when either is missing.
 
-The drawing shows the two lanes of the retrieval pipeline,
-`RAGRetriever.add_documents` for ingest and `retrieve()` for retrieval,
-sharing one embedder and one vector store; this notebook keeps the lanes
-fixed and changes what sits in those two boxes (Part 1 swaps the embedder
-between two embedding models, Part 2 changes the store's
-`distance_metric`, Parts 3 and 5 replace `InMemoryVectorStore` with
-`QdrantVectorStore` and `MilvusVectorStore`), Parts 2 to 4 also call
-`add_batch()`, `add()`, `search()`, `count()` and `clear()` on the store
-directly, and no agent search tool is in the path. Parts 1 to 5 return
-the ranked hits as they are; Part 6 puts a reranker between the store and
-the result:
+The drawing shows the two lanes of the retrieval pipeline, `RAGRetriever.add_documents` for ingest and `retrieve()` for retrieval, sharing one embedder and one vector store. This notebook keeps the lanes fixed and changes what sits in those two boxes:
+
+- Part 1 swaps the embedder between two embedding models.
+- Part 2 changes the store's `distance_metric`.
+- Parts 3 and 5 replace `InMemoryVectorStore` with `QdrantVectorStore` and `MilvusVectorStore`.
+- Parts 2 to 4 also call `add_batch()`, `add()`, `search()`, `count()` and `clear()` on the store directly.
+
+No agent search tool is in the path. Parts 1 to 5 return the ranked hits as they are; Part 6 puts a reranker between the store and the result:
 
 {{ locus_diagram rag-pipeline }}
 
@@ -109,17 +106,9 @@ extra is `locus-sdk[qdrant]`:
 
 {{ locus_source examples/notebook_52_rag_providers.py::part3_swap_backend }}
 
-Part 5 is the keyless store: `MilvusVectorStore(uri=…/runbooks.db,
-enable_hybrid=True)` runs Milvus Lite from a file in a temporary directory
-and adds a BM25 sparse field next to the dense vector. The retriever is
-built with `hybrid=True, hybrid_alpha=0.5`, and the same query runs twice
-through `retrieve(..., hybrid=False)` and `retrieve(..., hybrid=True)`.
-The query names an exact decline code, which carries little meaning for
-an embedding model and is decisive for BM25, so the blended scores differ
-from the vector-only ones (and the order can, on a larger corpus).
-`retriever.hybrid_supported` reports whether the store can blend; on a
-store without hybrid search the same switch falls back to vector-only
-search and logs it once:
+Part 5 is the keyless store: `MilvusVectorStore(uri=…/runbooks.db, enable_hybrid=True)` runs Milvus Lite from a file in a temporary directory and adds a BM25 sparse field next to the dense vector. The retriever is built with `hybrid=True, hybrid_alpha=0.5`, and the same query runs twice through `retrieve(..., hybrid=False)` and `retrieve(..., hybrid=True)`.
+
+The query names an exact decline code, which carries little meaning for an embedding model and is decisive for BM25, so the blended scores differ from the vector-only ones (and the order can, on a larger corpus). `retriever.hybrid_supported` reports whether the store can blend; on a store without hybrid search the same switch falls back to vector-only search and logs it once:
 
 {{ locus_source examples/notebook_52_rag_providers.py::part5_milvus_lite_hybrid }}
 
@@ -137,19 +126,11 @@ returned, so both signals print side by side:
 python examples/notebook_52_rag_providers.py
 ```
 
-Parts 1 to 5 call only the embedder; Part 6 also calls the chat model
-from `get_model()`, so `LOCUS_MODEL_PROVIDER` and `LOCUS_MODEL_ID` apply
-there. `get_embedder()` in `examples/config.py` picks the embedding
-provider from `LOCUS_EMBEDDING_PROVIDER`, or auto-detects OpenAI when
-`OPENAI_API_KEY` is set and OCI when only an OCI profile is; the model
-ids come from `LOCUS_EMBEDDING_MODEL` / `LOCUS_EMBEDDING_MODEL_B` or
-the provider's default pair. There is no mock fallback for embeddings:
-without a provider the script prints a skip notice naming the missing
-variable and exits cleanly before any embedding call. Part 3 needs the
-`qdrant-client` package (`pip install "locus-sdk[qdrant]"`) and Part 5
-the `pymilvus` package with Milvus Lite (`pip install "locus-sdk[milvus]"`);
-when one is missing, that part prints a notice and the remaining parts
-still run.
+Parts 1 to 5 call only the embedder; Part 6 also calls the chat model from `get_model()`, so `LOCUS_MODEL_PROVIDER` and `LOCUS_MODEL_ID` apply there. `get_embedder()` in `examples/config.py` picks the embedding provider from `LOCUS_EMBEDDING_PROVIDER`, or auto-detects OpenAI when `OPENAI_API_KEY` is set and OCI when only an OCI profile is; the model ids come from `LOCUS_EMBEDDING_MODEL` / `LOCUS_EMBEDDING_MODEL_B` or the provider's default pair.
+
+There is no mock fallback for embeddings: without a provider the script prints a skip notice naming the missing variable and exits cleanly before any embedding call.
+
+Part 3 needs the `qdrant-client` package (`pip install "locus-sdk[qdrant]"`) and Part 5 the `pymilvus` package with Milvus Lite (`pip install "locus-sdk[milvus]"`); when one is missing, that part prints a notice and the remaining parts still run.
 
 ## See also
 

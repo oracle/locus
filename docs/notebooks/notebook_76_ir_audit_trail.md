@@ -1,36 +1,18 @@
 # Incident response with a tamper-evident audit chain
 
-A production outage pages the on-call engineer at 2 AM. A `GovernedAgent` runs
-the four-phase Site Reliability Engineering (SRE) runbook the notebook defines,
-`sre_incident_runbook` (detect, triage, mitigate, recover). Every tool call —
-metrics query, log tail, deploy rollback — is recorded on a tamper-evident
-`AuditTrail` by the `AuditHook` that `governed_agent` attaches when its profile
-has `audit=True`, and the runner writes its own `incident-start`, `phase-<id>`
-and `incident-end` markers to the same trail. When the incident closes,
-`trail.verify()` recomputes the SHA-256 hash chain and `trail.export_jsonl()`
-produces a portable JSON Lines (JSONL) record of the mitigation.
+A production outage pages the on-call engineer at 2 AM. A `GovernedAgent` runs the four-phase Site Reliability Engineering (SRE) runbook the notebook defines, `sre_incident_runbook` (detect, triage, mitigate, recover).
 
-Without an audit log there is no record of why a remediation was taken; a
-tamper-evident trail shows what was done and flags after-the-fact edits. The
-chain is tamper-*evident*, not tamper-proof. The notebook's trail is unsigned
-and held in memory, so `verify()` called with no arguments catches an edit, a
-reorder or a deletion from the middle of the chain, but not records dropped
-from the end, and not a chain rebuilt around an edit by someone who can write
-the log. Pin `trail.head` somewhere the agent cannot reach and pass it back as
-`verify(expected_head=...)` to catch truncation.
+Every tool call — metrics query, log tail, deploy rollback — is recorded on a tamper-evident `AuditTrail` by the `AuditHook` that `governed_agent` attaches when its profile has `audit=True`, and the runner writes its own `incident-start`, `phase-<id>` and `incident-end` markers to the same trail. When the incident closes, `trail.verify()` recomputes the SHA-256 hash chain and `trail.export_jsonl()` produces a portable JSON Lines (JSONL) record of the mitigation.
 
-Signing closes the rebuild gap. Give the trail a signer with
-`AuditTrail(signer=Ed25519Signer.from_pem(...))`, which needs the `audit`
-extra (`pip install "locus-sdk[audit]"`), and every record's hash is signed
-with Ed25519. A chain rebuilt without the private key then fails
-`verify_jsonl(exported, keys={key_id: public_pem}, expected_head=...)`, a check
-an auditor can run with only the export, the public keys and the pinned head:
-no access to the running agent, just the `locus-sdk` package with the `audit`
-extra. The signature attests that a record was written as shown, not that its
-contents were correct. Persist the JSONL and pin the head hash externally
-before relying on the trail as SOC 2 (System and Organization Controls) or
-ISO 27001 change-management evidence, as a postmortem record, or under an
-audit hold.
+Without an audit log there is no record of why a remediation was taken; a tamper-evident trail shows what was done and flags after-the-fact edits. The chain is tamper-*evident*, not tamper-proof.
+
+The notebook's trail is unsigned and held in memory, so `verify()` called with no arguments catches an edit, a reorder or a deletion from the middle of the chain, but not records dropped from the end, and not a chain rebuilt around an edit by someone who can write the log. Pin `trail.head` somewhere the agent cannot reach and pass it back as `verify(expected_head=...)` to catch truncation.
+
+Signing closes the rebuild gap. Give the trail a signer with `AuditTrail(signer=Ed25519Signer.from_pem(...))`, which needs the `audit` extra (`pip install "locus-sdk[audit]"`), and every record's hash is signed with Ed25519.
+
+A chain rebuilt without the private key then fails `verify_jsonl(exported, keys={key_id: public_pem}, expected_head=...)`, a check an auditor can run with only the export, the public keys and the pinned head: no access to the running agent, just the `locus-sdk` package with the `audit` extra. The signature attests that a record was written as shown, not that its contents were correct.
+
+Persist the JSONL and pin the head hash externally before relying on the trail as SOC 2 (System and Organization Controls) or ISO 27001 change-management evidence, as a postmortem record, or under an audit hold.
 
 What this notebook covers:
 

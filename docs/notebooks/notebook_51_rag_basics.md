@@ -36,16 +36,12 @@ What this notebook covers:
 export OPENAI_API_KEY=sk-...
 ```
 
-The drawing shows the two lanes of the retrieval pipeline, which share
-one embedder and one vector store. This notebook drives both lanes
-directly over the in-memory store, with no loader, no reranker and no
-agent in front: step 2 runs the ingest lane by hand with `embed_batch()`
-and `add_batch()`, and step 3 hands it to `RAGRetriever.add_document()`,
-which would also split any text longer than `chunk_size`.
-`RAGRetriever.retrieve()` is the retrieve lane, embedding each question
-with the same embedder, searching the store and returning a
-`RetrievalResult` whose documents carry content, score and metadata; the
-Agent and Search tool at the head of that lane are what notebook 53 adds:
+The drawing shows the two lanes of the retrieval pipeline, which share one embedder and one vector store. This notebook drives both lanes directly over the in-memory store, with no loader, no reranker and no agent in front:
+
+- Ingest lane: step 2 runs it by hand with `embed_batch()` and `add_batch()`, and step 3 hands it to `RAGRetriever.add_document()`, which would also split any text longer than `chunk_size`.
+- Retrieve lane: `RAGRetriever.retrieve()`, embedding each question with the same embedder, searching the store and returning a `RetrievalResult` whose documents carry content, score and metadata.
+
+The Agent and Search tool at the head of that lane are what notebook 53 adds:
 
 {{ locus_diagram rag-pipeline }}
 

@@ -41,33 +41,17 @@ timeout dropped for that subscriber only:
 
 ## Key lines
 
-`part1_global_vs_per_run` starts a global telemetry forwarder and a
-per-deployment subscriber, yields once so both attach before the first
-event is published (the global stream has no history replay to fall back
-on), then runs two rollouts under `run_context` and closes each stream.
-The forwarder records every event from both deployments and returns
-after the second `agent.terminate`; the per-deployment subscriber
-records only its own rollout. The forwarder tags each kind with the
-first six characters of the run id, which for `deploy-A` and `deploy-B`
-is the shared prefix `deploy`, so its list shows how many events crossed
-the global tap rather than which rollout each came from:
+`part1_global_vs_per_run` starts a global telemetry forwarder and a per-deployment subscriber, yields once so both attach before the first event is published (the global stream has no history replay to fall back on), then runs two rollouts under `run_context` and closes each stream.
+
+The forwarder records every event from both deployments and returns after the second `agent.terminate`; the per-deployment subscriber records only its own rollout. The forwarder tags each kind with the first six characters of the run id, which for `deploy-A` and `deploy-B` is the shared prefix `deploy`, so its list shows how many events crossed the global tap rather than which rollout each came from:
 
 {{ locus_source examples/notebook_62_eventbus_subscribers.py::part1_global_vs_per_run }}
 
-`part2_stats` reads the `bus.stats()` snapshot once both rollouts have
-finished: active runs, global subscribers, retained run histories, the
-`dropped_events_total` counter and per-run queue depths, the health
-metrics of the event pipeline. `close_stream` has already removed the
-per-deployment subscriber's queue (`deploy-B` never had one) and kept both
-runs' histories, so `active_runs` is 0, `queue_depths` is empty and
-`history_runs` is 2. `global_subscribers` still reads 1: the forwarder
-returned from inside `async for`, which leaves the `subscribe_global()`
-generator suspended at its `yield`, and the bus removes that
-subscriber's queue only in the generator's `finally` block. That block
-runs when the consumer calls `aclose()` on the generator, or on a later
-loop iteration when the event loop runs the `aclose()` it schedules for
-a garbage-collected generator; it does not run at the moment the
-consuming task returns:
+`part2_stats` reads the `bus.stats()` snapshot once both rollouts have finished: active runs, global subscribers, retained run histories, the `dropped_events_total` counter and per-run queue depths, the health metrics of the event pipeline.
+
+`close_stream` has already removed the per-deployment subscriber's queue (`deploy-B` never had one) and kept both runs' histories, so `active_runs` is 0, `queue_depths` is empty and `history_runs` is 2.
+
+`global_subscribers` still reads 1: the forwarder returned from inside `async for`, which leaves the `subscribe_global()` generator suspended at its `yield`, and the bus removes that subscriber's queue only in the generator's `finally` block. That block runs when the consumer calls `aclose()` on the generator, or on a later loop iteration when the event loop runs the `aclose()` it schedules for a garbage-collected generator; it does not run at the moment the consuming task returns:
 
 {{ locus_source examples/notebook_62_eventbus_subscribers.py::part2_stats }}
 
