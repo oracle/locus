@@ -27,17 +27,11 @@ What this notebook covers:
 - [The orchestrator pattern](notebook_22_orchestrator_pattern.md) if you
   want the supervised counterpoint to a swarm.
 
-The drawing follows one swarm run of the kind `example_full_swarm`
-performs; its Scout, Analyst and Writer are generic peers, and this
-notebook's Diagnostics, Mitigation and Comms responders take their
-place. Tasks enter one priority-ordered queue, seeded with `add_task` or
-added by `execute(initial_task)`, which also asks the swarm's model to
-split the brief into subtasks; each peer claims the first pending task
-its capabilities match, reads a summary of the `SharedContext` in its
-prompt and writes its findings back to it; and once no task is pending —
-or, when a task no peer can claim remains, after `max_iterations`
-rounds — the run returns a `SwarmResult` with the completed and failed
-tasks and a summary the swarm's model writes from the shared context:
+The drawing follows one swarm run of the kind `example_full_swarm` performs; its Scout, Analyst and Writer are generic peers, and this notebook's Diagnostics, Mitigation and Comms responders take their place.
+
+Tasks enter one priority-ordered queue, seeded with `add_task` or added by `execute(initial_task)`, which also asks the swarm's model to split the brief into subtasks. Each peer claims the first pending task its capabilities match, reads a summary of the `SharedContext` in its prompt and writes its findings back to it.
+
+Once no task is pending — or, when a task no peer can claim remains, after `max_iterations` rounds — the run returns a `SwarmResult` with the completed and failed tasks and a summary the swarm's model writes from the shared context:
 
 {{ locus_diagram swarm }}
 
@@ -61,16 +55,9 @@ names against the description:
 
 {{ locus_source examples/notebook_24_swarm_multiagent.py::example_capability_matching }}
 
-`create_swarm` assembles the three tagged responders around one model,
-and a single `Swarm.execute` call with `decompose_tasks=True` queues the
-incident brief, asks the model to split it into untagged subtasks and
-lets the responders claim and work them in turn; it returns a
-`SwarmResult` with the completed and failed tasks and a summary. Because
-the brief and its subtasks carry no tags, a responder is eligible only
-when one of its capability names, such as `investigate` or `write`,
-appears in the brief or in a subtask the model wrote; a task no
-responder is eligible for stays pending, appears in neither list and
-does not affect `success`:
+`create_swarm` assembles the three tagged responders around one model, and a single `Swarm.execute` call with `decompose_tasks=True` queues the incident brief, asks the model to split it into untagged subtasks and lets the responders claim and work them in turn; it returns a `SwarmResult` with the completed and failed tasks and a summary.
+
+Because the brief and its subtasks carry no tags, a responder is eligible only when one of its capability names, such as `investigate` or `write`, appears in the brief or in a subtask the model wrote. A task no responder is eligible for stays pending, appears in neither list and does not affect `success`:
 
 {{ locus_source examples/notebook_24_swarm_multiagent.py::example_full_swarm }}
 

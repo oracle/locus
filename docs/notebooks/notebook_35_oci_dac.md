@@ -88,18 +88,13 @@ built with `text_tool_calls="on"`:
 python examples/notebook_35_oci_dac.py
 ```
 
-The script calls a Dedicated AI Cluster directly and does not use the
-shared `examples/config.py` harness, so there is no mock fallback. It
-reads the variables from Prerequisites: `OCI_DAC_ENDPOINT_OCID` and
-`OCI_DAC_COMPARTMENT_ID` name the endpoint and its compartment,
-`OCI_DAC_REGION` (default `us-chicago-1`) selects the regional inference
-endpoint, and `OCI_PROFILE` (default `DEFAULT`) together with
-`OCI_AUTH_TYPE` (`api_key` by default, or `security_token` for a profile
-created by `oci session authenticate`) selects the `~/.oci/config`
-profile that may invoke it. Without the two DAC variables the script
-still exits cleanly and makes no network call: Part 1 prints the routing
-rules, Part 2 prints the wiring snippet, and Parts 3 to 5 print a skip
-notice.
+The script calls a Dedicated AI Cluster directly and does not use the shared `examples/config.py` harness, so there is no mock fallback. It reads the variables from Prerequisites:
+
+- `OCI_DAC_ENDPOINT_OCID` and `OCI_DAC_COMPARTMENT_ID` name the endpoint and its compartment.
+- `OCI_DAC_REGION` (default `us-chicago-1`) selects the regional inference endpoint.
+- `OCI_PROFILE` (default `DEFAULT`) together with `OCI_AUTH_TYPE` (`api_key` by default, or `security_token` for a profile created by `oci session authenticate`) selects the `~/.oci/config` profile that may invoke it.
+
+Without the two DAC variables the script still exits cleanly and makes no network call: Part 1 prints the routing rules, Part 2 prints the wiring snippet, and Parts 3 to 5 print a skip notice.
 
 ## See also
 

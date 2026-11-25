@@ -1,30 +1,14 @@
 # Oracle in-DB embeddings
 
-Oracle Database 26ai can run the embedding and the similarity search of
-a retrieval-augmented generation (RAG) pipeline without the text leaving
-the database. An Open Neural Network Exchange (ONNX) model, loaded once
-with `DBMS_VECTOR.LOAD_ONNX_MODEL_CLOUD` (Autonomous Database) or
-`DBMS_VECTOR.LOAD_ONNX_MODEL` (on-premises), produces vectors
-server-side through `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`, and
-`VECTOR_DISTANCE` ranks the stored vectors in a second SQL statement
-against the same database. The text to embed travels from the
-application to the database and nowhere else: no embedding endpoint
-outside the database sees it. The guarantee covers embedding and
-search; the question and the retrieved passages still go to whichever
-chat model the agent is configured with, so pair the pipeline with an
-OCI Generative AI model in the same region when end-to-end residency is
-required.
+Oracle Database 26ai can run the embedding and the similarity search of a retrieval-augmented generation (RAG) pipeline without the text leaving the database.
 
-`OracleInDBEmbeddings` is the adapter. Pair it with
-`OracleVectorStore`, sharing one wallet and one set of connection
-settings, and the result is a complete in-database retrieval pipeline.
-To drive it the notebook builds a `RAGRetriever` over
-`OracleInDBEmbeddings` and `OracleVectorStore` and hands it to an `Agent` through `create_rag_tool(retriever, ..., limit=3)`. Each
-retrieval is two SQL statements, both executed inside the database: the
-query text goes in once, and only its vector and the ranked rows come
-back; there is no external embedding endpoint and no Python embedding
-library. The agent is the harness; the in-database embedder and
-`VECTOR_DISTANCE` are the subject.
+An Open Neural Network Exchange (ONNX) model, loaded once with `DBMS_VECTOR.LOAD_ONNX_MODEL_CLOUD` (Autonomous Database) or `DBMS_VECTOR.LOAD_ONNX_MODEL` (on-premises), produces vectors server-side through `DBMS_VECTOR_CHAIN.UTL_TO_EMBEDDING`, and `VECTOR_DISTANCE` ranks the stored vectors in a second SQL statement against the same database.
+
+The text to embed travels from the application to the database and nowhere else: no embedding endpoint outside the database sees it. The guarantee covers embedding and search; the question and the retrieved passages still go to whichever chat model the agent is configured with, so pair the pipeline with an OCI Generative AI model in the same region when end-to-end residency is required.
+
+`OracleInDBEmbeddings` is the adapter. Pair it with `OracleVectorStore`, sharing one wallet and one set of connection settings, and the result is a complete in-database retrieval pipeline. To drive it the notebook builds a `RAGRetriever` over `OracleInDBEmbeddings` and `OracleVectorStore` and hands it to an `Agent` through `create_rag_tool(retriever, ..., limit=3)`.
+
+Each retrieval is two SQL statements, both executed inside the database: the query text goes in once, and only its vector and the ranked rows come back; there is no external embedding endpoint and no Python embedding library. The agent is the harness; the in-database embedder and `VECTOR_DISTANCE` are the subject.
 
 What this notebook covers:
 
@@ -135,19 +119,11 @@ answer in `final_message`:
 python examples/notebook_41_oracle_indb_embeddings.py
 ```
 
-The script needs an Oracle Database 26ai reachable through the variables in
-Prerequisites: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus
-`ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet
-is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a
-tnsnames alias, with the ONNX model loaded and granted
-as shown above; `OCI_INDB_MODEL` and `OCI_INDB_DIM` override the model
-name and its output width, and must change together. When any of them is
-unset it prints the missing names and the minimal wiring, then
-exits cleanly without opening a connection. When the model is not
-loaded, the first embedding call raises an `ORA-` error that the
-script recognizes and reports as a skip notice. With the database in
-place it creates the `locus_notebook_41` table in that schema on first
-use and does not drop it, so each run adds the five passages again.
+The script needs an Oracle Database 26ai reachable through the variables in Prerequisites: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD`, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` only when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias, with the ONNX model loaded and granted as shown above; `OCI_INDB_MODEL` and `OCI_INDB_DIM` override the model name and its output width, and must change together.
+
+When any of them is unset it prints the missing names and the minimal wiring, then exits cleanly without opening a connection. When the model is not loaded, the first embedding call raises an `ORA-` error that the script recognizes and reports as a skip notice.
+
+With the database in place it creates the `locus_notebook_41` table in that schema on first use and does not drop it, so each run adds the five passages again.
 
 The agent's model comes from `examples/config.py`: OCI Generative AI
 when `~/.oci/config` has a usable profile, otherwise the bundled mock

@@ -11,14 +11,9 @@ The default router is deterministic: the model fills a `GoalFrame`, then
 reproducible, auditable and rule-based, which is what an on-call lead
 expects from an incident router.
 
-The emergent router is the opt-in second mode. When more than one protocol
-passes the filter — for example, a `COMPARE` goal at LOW risk, which both
-`debate` and `specialist_fanout` handle — the `LLMProtocolPicker` asks the
-model to make the last-mile choice and returns a one-sentence rationale
-with its pick. On a `Router.dispatch()` the compiler records that rationale
-on the `router.protocol.selected` event. Moving *only* the disambiguation
-step to the model keeps the routing audit trail intact, which matters when
-a routed protocol fans work out to agents that act on production systems.
+The emergent router is the opt-in second mode. When more than one protocol passes the filter — for example, a `COMPARE` goal at LOW risk, which both `debate` and `specialist_fanout` handle — the `LLMProtocolPicker` asks the model to make the last-mile choice and returns a one-sentence rationale with its pick.
+
+On a `Router.dispatch()` the compiler records that rationale on the `router.protocol.selected` event. Moving *only* the disambiguation step to the model keeps the routing audit trail intact, which matters when a routed protocol fans work out to agents that act on production systems.
 
 What this notebook covers:
 

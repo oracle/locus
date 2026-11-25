@@ -1,15 +1,8 @@
 # Research workflow
 
-The capstone of the multi-agent shapes: a research-shaped pipeline that
-strings six node primitives into a single `StateGraph` and streams every
-step. Here a customer-support analyst investigates the known-issue
-knowledge base — gathering evidence from knowledge-base tools, inferring
-the root cause, summarizing, scoring the summary's grounding against the
-evidence, and reworking it when the score is low. An ungrounded claim is
-a hallucinated answer, so a summary below the threshold is sent back for
-rework while the recovery budgets last rather than straight into the
-customer reply; the final state carries the last grounding score next to
-the summary, so the caller can tell when the budgets ran out first.
+The capstone of the multi-agent shapes: a research-shaped pipeline that strings six node primitives into a single `StateGraph` and streams every step. Here a customer-support analyst investigates the known-issue knowledge base — gathering evidence from knowledge-base tools, inferring the root cause, summarizing, scoring the summary's grounding against the evidence, and reworking it when the score is low.
+
+An ungrounded claim is a hallucinated answer, so a summary below the threshold is sent back for rework while the recovery budgets last rather than straight into the customer reply; the final state carries the last grounding score next to the summary, so the caller can tell when the budgets ran out first.
 
 What this notebook covers:
 
@@ -35,17 +28,14 @@ What this notebook covers:
 - [Observability basics](notebook_60_observability_basics.md) and
   [SSE streaming](notebook_64_sse_streaming.md).
 
-Part 1 runs the graph in the drawing against the knowledge-base tools.
-Execute gathers evidence in an agent tool loop; Causal inference builds a
-root-cause chain from that evidence (on by default; with
-`causal_inference=False` Execute goes straight to Summarize); Summarize
-distills the evidence into the summary and, when the model returns one,
-the typed `SupportAssessment`; Grounding eval scores the summary's claims
-against the evidence. Below `grounding_threshold` the router goes to
-Regenerate, a rewrite without re-running tools, while regenerations are
-left, then to Replan, a prompt focused on the ungrounded claims and sent
-back to Execute, while replans are left. Once both are used up the run
-ends:
+Part 1 runs the graph in the drawing against the knowledge-base tools:
+
+- Execute gathers evidence in an agent tool loop.
+- Causal inference builds a root-cause chain from that evidence (on by default; with `causal_inference=False` Execute goes straight to Summarize).
+- Summarize distills the evidence into the summary and, when the model returns one, the typed `SupportAssessment`.
+- Grounding eval scores the summary's claims against the evidence.
+
+Below `grounding_threshold` the router goes to Regenerate, a rewrite without re-running tools, while regenerations are left, then to Replan, a prompt focused on the ungrounded claims and sent back to Execute, while replans are left. Once both are used up the run ends:
 
 {{ locus_diagram deepagent-workflow }}
 

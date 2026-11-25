@@ -1,15 +1,8 @@
 # MCP integration
 
-MCP (Model Context Protocol) is the open standard that lets AI
-assistants call tools running in a different process — the way a
-support desk wires its order system, help center and billing services
-into an agent without bundling them. The SDK speaks both sides of the
-protocol. This notebook builds the publishing side: a support agent
-whose tools, and the agent itself, can be served to any MCP client.
-Consuming an external MCP server from an agent (`MCPClient`, and
-the hooks pattern for side effects in the host process) is the other
-half, covered in
-[MCP](../concepts/mcp.md#getting-started-consume-an-mcp-server).
+MCP (Model Context Protocol) is the open standard that lets AI assistants call tools running in a different process — the way a support desk wires its order system, help center and billing services into an agent without bundling them. The SDK speaks both sides of the protocol. This notebook builds the publishing side: a support agent whose tools, and the agent itself, can be served to any MCP client.
+
+Consuming an external MCP server from an agent (`MCPClient`, and the hooks pattern for side effects in the host process) is the other half, covered in [MCP](../concepts/mcp.md#getting-started-consume-an-mcp-server).
 
 The configured provider drives the agent; the MCP layer is transport
 only, so the same agent works against any provider. All tool outputs are

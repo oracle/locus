@@ -42,34 +42,19 @@ What this notebook covers:
 - [Swarm](notebook_24_swarm_multiagent.md), where agents pull work from a
   shared queue instead of being handed a case.
 
-The drawing follows one `execute_handoff` call of the kind Part 4 makes,
-from the L1 agent to the L2 tier. It is shared with the
-[Handoff](../concepts/multi-agent/handoff.md) concept page, so its target
-is named `L2 Billing`; this notebook's L2 is the `L2 Support Specialist`.
-The manager refuses with a failed `HandoffResult` when the target is not
-registered or its history already holds `max_handoff_chain` contexts.
-Otherwise it builds the `HandoffContext` from the task, findings,
-instructions and handoff chain and, because the call passes the L1 state,
-adds the source's confidence and a conversation summary; key messages from
-the transcript are attached only with `preserve_full_history` on. The L2
-agent reads that context as its prompt and answers with a `HandoffResult`
-carrying a success flag, its output and a final confidence:
+The drawing follows one `execute_handoff` call of the kind Part 4 makes, from the L1 agent to the L2 tier. It is shared with the [Handoff](../concepts/multi-agent/handoff.md) concept page, so its target is named `L2 Billing`; this notebook's L2 is the `L2 Support Specialist`.
+
+The manager refuses with a failed `HandoffResult` when the target is not registered or its history already holds `max_handoff_chain` contexts. Otherwise it builds the `HandoffContext` from the task, findings, instructions and handoff chain and, because the call passes the L1 state, adds the source's confidence and a conversation summary; key messages from the transcript are attached only with `preserve_full_history` on.
+
+The L2 agent reads that context as its prompt and answers with a `HandoffResult` carrying a success flag, its output and a final confidence:
 
 {{ locus_diagram handoff }}
 
 ## Key lines
 
-The example keeps the whole walk in `main`, so the excerpt below is the
-full program. Part 1 attaches the models, builds the three tiers with
-`create_handoff_agent`, declares the delegation and escalation paths
-(`can_delegate_to` and `can_escalate_to` are recorded on the agents but
-not checked by the manager) and sends the L1 seat a one-line smoke test
-through `receive_handoff`. Part 2 builds a `HandoffContext` by hand and
-prints its `to_prompt()`; Part 3 lists the five `HandoffReason` values.
-Part 4 runs one `execute_handoff` from L1 to L2 with the L1 state, Part 5
-builds a context from an `AgentState` with `create_handoff`, Part 6 walks
-L1 → L2 → L3 with `chain_handoff`, and Part 7 reads the manager's history
-back as the audit trail:
+The example keeps the whole walk in `main`, so the excerpt below is the full program. Part 1 attaches the models, builds the three tiers with `create_handoff_agent`, declares the delegation and escalation paths (`can_delegate_to` and `can_escalate_to` are recorded on the agents but not checked by the manager) and sends the L1 seat a one-line smoke test through `receive_handoff`.
+
+Part 2 builds a `HandoffContext` by hand and prints its `to_prompt()`; Part 3 lists the five `HandoffReason` values. Part 4 runs one `execute_handoff` from L1 to L2 with the L1 state, Part 5 builds a context from an `AgentState` with `create_handoff`, Part 6 walks L1 → L2 → L3 with `chain_handoff`, and Part 7 reads the manager's history back as the audit trail:
 
 {{ locus_source examples/notebook_25_agent_handoff.py::main }}
 

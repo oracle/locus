@@ -41,16 +41,9 @@ What this notebook covers:
 - [Swarm multi-agent](notebook_24_swarm_multiagent.md), for the
   unsupervised counterpoint.
 
-The drawing shows the generic shape of one `orchestrator.execute(...)`
-call; its Research, Data and not-picked boxes stand for whichever
-specialists are registered, here the log analyst, the metrics analyst
-and the data-inventory specialist. The data-subject request reaches the
-privacy officer, whose model picks which of the registered specialists
-run and gives each a sub-task; the picked specialists run in parallel,
-at most `max_parallel_specialists` at a time, without seeing one
-another's work; and their results return to the officer's model, which
-correlates and summarizes them into one `OrchestratorResult`, with a
-failed specialist recorded as an error while the rest carry on:
+The drawing shows the generic shape of one `orchestrator.execute(...)` call; its Research, Data and not-picked boxes stand for whichever specialists are registered, here the log analyst, the metrics analyst and the data-inventory specialist.
+
+The data-subject request reaches the privacy officer, whose model picks which of the registered specialists run and gives each a sub-task. The picked specialists run in parallel, at most `max_parallel_specialists` at a time, without seeing one another's work. Their results return to the officer's model, which correlates and summarizes them into one `OrchestratorResult`, with a failed specialist recorded as an error while the rest carry on:
 
 {{ locus_diagram orchestrator }}
 
@@ -91,16 +84,11 @@ Model choice comes from `examples/config.py`: OCI Generative AI when
 example also runs offline with no credentials. Set `LOCUS_MODEL_PROVIDER`
 (`oci`, `openai`, `anthropic` or `mock`) to force one.
 
-Routing reads a fenced JSON block out of the model's reply; when there is
-none, or it does not parse, routing falls back to the specialist IDs the
-reply names, or to every registered specialist if it names none. The mock
-model's reply carries no JSON block, so offline all three registered
-specialists run in Part 7. The mock answers a tool-bearing request with a
-tool call and no text, and `Specialist.execute` does not run it, so the
-inventory specialist's reply is empty: Part 3 prints no output line, and in
-Part 7 it shows no output preview even after the orchestrator's single
-retry on an empty reply. To stay offline regardless of what `~/.oci/config`
-holds:
+Routing reads a fenced JSON block out of the model's reply; when there is none, or it does not parse, routing falls back to the specialist IDs the reply names, or to every registered specialist if it names none. The mock model's reply carries no JSON block, so offline all three registered specialists run in Part 7.
+
+The mock answers a tool-bearing request with a tool call and no text, and `Specialist.execute` does not run it, so the inventory specialist's reply is empty: Part 3 prints no output line, and in Part 7 it shows no output preview even after the orchestrator's single retry on an empty reply.
+
+To stay offline regardless of what `~/.oci/config` holds:
 
 ```bash
 LOCUS_MODEL_PROVIDER=mock python examples/notebook_22_orchestrator_pattern.py

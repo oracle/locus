@@ -41,16 +41,9 @@ What this notebook covers:
 - `pip install fastapi uvicorn` for the server side.
 - [Agent basics](notebook_02_basic_agent.md).
 
-The drawing is Parts 2 and 3 seen from both processes. In the partner
-bank's process, `A2AClient` fetches the Agent Card from
-`GET /.well-known/agent-card.json` (the risk agent's skills, capabilities
-and URL) and then posts a JSON-RPC `SendMessage` to `/`; in the payment
-network's process, `A2AServer` runs the risk agent on the message text and
-returns a completed `Task` carrying the answer as an artifact. The two
-notes under the lanes are Parts 7 and 1: `SendStreamingMessage` runs a
-second message the same way but delivers the task, its status updates and
-the artifact as server-sent events, and because the server was given an
-`api_key`, every route, the card included, requires the bearer token:
+The drawing is Parts 2 and 3 seen from both processes. In the partner bank's process, `A2AClient` fetches the Agent Card from `GET /.well-known/agent-card.json` (the risk agent's skills, capabilities and URL) and then posts a JSON-RPC `SendMessage` to `/`; in the payment network's process, `A2AServer` runs the risk agent on the message text and returns a completed `Task` carrying the answer as an artifact.
+
+The two notes under the lanes are Parts 7 and 1: `SendStreamingMessage` runs a second message the same way but delivers the task, its status updates and the artifact as server-sent events, and because the server was given an `api_key`, every route, the card included, requires the bearer token:
 
 {{ locus_diagram a2a }}
 

@@ -7,18 +7,11 @@ scores high but whose semantic relevance is lower. A **cross-encoder
 reranker** scores the query and each candidate together and catches the
 signals embeddings miss.
 
-This notebook wires Cohere Reranker V4 on Oracle Cloud Infrastructure
-(OCI) Generative AI on top of an Oracle Database 26ai vector store and
-compares two retrievers over the same store: a baseline that ranks by
-embedding similarity alone, and a second that over-fetches the candidate
-pool and lets the reranker rescore it. Retrieve-then-rerank has four
-steps: embed the corpus once into the vector store; at query time,
-over-fetch a wide candidate set cheaply from the store; have the reranker
-rescore each candidate against the query and keep the top-N; then feed the
-top-N to the model as grounded context. This example performs the first
-three steps and prints the ranks; it has no chat model.
-[Notebook 38](notebook_38_oracle_26ai_rag.md) shows an agent consuming
-hits from the same kind of store.
+This notebook wires Cohere Reranker V4 on Oracle Cloud Infrastructure (OCI) Generative AI on top of an Oracle Database 26ai vector store and compares two retrievers over the same store: a baseline that ranks by embedding similarity alone, and a second that over-fetches the candidate pool and lets the reranker rescore it.
+
+Retrieve-then-rerank has four steps: embed the corpus once into the vector store; at query time, over-fetch a wide candidate set cheaply from the store; have the reranker rescore each candidate against the query and keep the top-N; then feed the top-N to the model as grounded context.
+
+This example performs the first three steps and prints the ranks; it has no chat model. [Notebook 38](notebook_38_oracle_26ai_rag.md) shows an agent consuming hits from the same kind of store.
 
 The run reports where the canonical hepcidin passage lands in each pass,
 so any lift from reranking shows as a change of rank; when the passage
@@ -74,17 +67,9 @@ the `RetrievalResult` returns:
 
 ## Key lines
 
-The example keeps the comparison in `main`. Read it from
-`baseline = RAGRetriever(embedder=embedder, store=store)`, which retrieves
-by embedding similarity alone, to `reranked_retriever`, which adds
-`reranker=OCICohereReranker(model="cohere.rerank-v4.0-fast", top_n=4, ...)`
-and `rerank_candidate_pool=len(CORPUS)`, so that `retrieve(QUERY, limit=4)`
-fetches as many hits from the store as the corpus has passages, has the
-cross-encoder rescore them and returns the top four. The closing block
-reports the canonical hepcidin passage's position in each list; the two
-`score` columns are on different scales, the store's similarity
-`1 - distance / 2` over the cosine distance for the baseline and the
-reranker's `relevance_score` after reranking:
+The example keeps the comparison in `main`. Read it from `baseline = RAGRetriever(embedder=embedder, store=store)`, which retrieves by embedding similarity alone, to `reranked_retriever`, which adds `reranker=OCICohereReranker(model="cohere.rerank-v4.0-fast", top_n=4, ...)` and `rerank_candidate_pool=len(CORPUS)`, so that `retrieve(QUERY, limit=4)` fetches as many hits from the store as the corpus has passages, has the cross-encoder rescore them and returns the top four.
+
+The closing block reports the canonical hepcidin passage's position in each list; the two `score` columns are on different scales, the store's similarity `1 - distance / 2` over the cosine distance for the baseline and the reranker's `relevance_score` after reranking:
 
 {{ locus_source examples/notebook_45_cohere_reranker.py::main }}
 
@@ -94,20 +79,11 @@ reranker's `relevance_score` after reranking:
 python examples/notebook_45_cohere_reranker.py
 ```
 
-The script needs two live services and no chat model, so
-`examples/config.py` and `LOCUS_MODEL_PROVIDER` play no part here.
-Oracle Database 26ai is reached
-through `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` from Prerequisites,
-plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet
-is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a
-tnsnames alias; each run appends the eight passages to a `locus_notebook_45`
-table in that schema, created on first use. Both the Cohere `embed-v4.0`
-embeddings and the `rerank-v4.0-fast` reranker come from OCI Generative
-AI, which needs `OCI_COMPARTMENT`; `OCI_PROFILE`, `OCI_REGION` and
-`OCI_AUTH_TYPE` default to `DEFAULT`, `us-chicago-1` and `api_key`, and
-the `LOCUS_OCI_*` equivalents take precedence when set. If any of the
-five required variables is missing, the script prints a skip notice
-listing them and exits cleanly without opening a connection.
+The script needs two live services and no chat model, so `examples/config.py` and `LOCUS_MODEL_PROVIDER` play no part here. Oracle Database 26ai is reached through `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` from Prerequisites, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias. Each run appends the eight passages to a `locus_notebook_45` table in that schema, created on first use.
+
+Both the Cohere `embed-v4.0` embeddings and the `rerank-v4.0-fast` reranker come from OCI Generative AI, which needs `OCI_COMPARTMENT`; `OCI_PROFILE`, `OCI_REGION` and `OCI_AUTH_TYPE` default to `DEFAULT`, `us-chicago-1` and `api_key`, and the `LOCUS_OCI_*` equivalents take precedence when set.
+
+If any of the five required variables is missing, the script prints a skip notice listing them and exits cleanly without opening a connection.
 
 ## See also
 

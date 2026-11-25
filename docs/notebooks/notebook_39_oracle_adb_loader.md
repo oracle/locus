@@ -8,15 +8,9 @@ connection pool and yields one `Document` per row, ready for chunking,
 embedding or direct use by an agent. This notebook puts the loader behind
 an `@tool` so that an `Agent` decides which rows to fetch.
 
-Two properties shape how the loader is used. The SQL text is fixed when
-the loader is constructed and is handed to the driver verbatim, so the
-caller owns its shape and must keep user input out of it; in this
-notebook the agent's `topic` reaches the database only through
-`bind_params`. The loader's connection arguments — `dsn`, `user`,
-`password`, `wallet_location`, `wallet_password` — are the same ones the
-vector store (notebook 38), in-DB chunker (40), in-DB embeddings (41) and
-checkpointer (42) accept, so one configuration block serves the whole
-stack even though each class opens its own pool.
+Two properties shape how the loader is used. The SQL text is fixed when the loader is constructed and is handed to the driver verbatim, so the caller owns its shape and must keep user input out of it. In this notebook the agent's `topic` reaches the database only through `bind_params`.
+
+The loader's connection arguments — `dsn`, `user`, `password`, `wallet_location`, `wallet_password` — are the same ones the vector store (notebook 38), in-DB chunker (40), in-DB embeddings (41) and checkpointer (42) accept, so one configuration block serves the whole stack even though each class opens its own pool.
 
 The agent decides which topic to fetch from a disposable
 `locus_notebook_39_articles` table, the loader's `SELECT` runs inside a
@@ -88,21 +82,11 @@ carried by the `terminate` event:
 python examples/notebook_39_oracle_adb_loader.py
 ```
 
-The script needs an Autonomous Database: `ORACLE_DSN`, `ORACLE_USER` and
-`ORACLE_PASSWORD` must be set, plus `ORACLE_WALLET` for mutual TLS
-(`ORACLE_WALLET_PASSWORD` when the wallet is encrypted) or `ORACLE_CONFIG_DIR`
-when a TLS-only database is named by a tnsnames alias. When any of them is
-missing it prints the missing names and the minimal wiring
-snippet, then exits cleanly without opening a connection. The agent's
-model comes from `examples/config.py`: OCI Generative AI when
-`~/.oci/config` has a usable profile, otherwise the bundled mock model;
-set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to
-force one. Under the mock model the first turn of each run still issues a
-synthesised tool call, so the parameter-bound `SELECT` does run against
-the database; the synthesised `topic` is a single capitalised word taken
-from the prompt rather than one of the stored labels, so the query
-returns no rows, and the closing answer is placeholder text rather than a
-reading of the result.
+The script needs an Autonomous Database: `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` must be set, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias. When any of them is missing it prints the missing names and the minimal wiring snippet, then exits cleanly without opening a connection.
+
+The agent's model comes from `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable profile, otherwise the bundled mock model. Set `LOCUS_MODEL_PROVIDER` (`oci`, `openai`, `anthropic` or `mock`) to force one.
+
+Under the mock model the first turn of each run still issues a synthesised tool call, so the parameter-bound `SELECT` does run against the database; the synthesised `topic` is a single capitalised word taken from the prompt rather than one of the stored labels, so the query returns no rows, and the closing answer is placeholder text rather than a reading of the result.
 
 ## See also
 

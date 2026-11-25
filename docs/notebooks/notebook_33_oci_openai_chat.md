@@ -70,18 +70,15 @@ not offer:
 python examples/notebook_33_oci_openai_chat.py
 ```
 
-The script calls OCI Generative AI directly and does not use the shared
-`examples/config.py` harness, so there is no mock fallback. It reads the
-three variables from Prerequisites: `OCI_PROFILE` names a profile in
-`~/.oci/config` with Generative AI access, `OCI_REGION` defaults to
-`us-chicago-1`, and `OCI_COMPARTMENT` is the compartment sent with each
-request; when it is unset the class falls back to `OCI_COMPARTMENT_ID`
-and then to the profile's tenancy OCID.
-Without `OCI_PROFILE` the script prints its banner and the Part 1
-heading, writes a skip notice to stderr and exits with status 77, which
-`scripts/run_notebooks.py` reports as a skip rather than a failure. The
-walkthrough calls `meta.llama-3.3-70b-instruct` and `openai.gpt-5`, and
-Part 5 adds an xAI and a Cohere model id.
+The script calls OCI Generative AI directly and does not use the shared `examples/config.py` harness, so there is no mock fallback. It reads the three variables from Prerequisites:
+
+- `OCI_PROFILE` names a profile in `~/.oci/config` with Generative AI access.
+- `OCI_REGION` defaults to `us-chicago-1`.
+- `OCI_COMPARTMENT` is the compartment sent with each request; when it is unset the class falls back to `OCI_COMPARTMENT_ID` and then to the profile's tenancy OCID.
+
+Without `OCI_PROFILE` the script prints its banner and the Part 1 heading, writes a skip notice to stderr and exits with status 77, which `scripts/run_notebooks.py` reports as a skip rather than a failure.
+
+The walkthrough calls `meta.llama-3.3-70b-instruct` and `openai.gpt-5`, and Part 5 adds an xAI and a Cohere model id.
 
 ## See also
 

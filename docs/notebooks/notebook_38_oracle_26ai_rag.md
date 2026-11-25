@@ -1,15 +1,10 @@
 # Oracle 26ai RAG agent
 
-An `Agent` that answers questions with retrieval-augmented generation
-(RAG) over Oracle Database 26ai. The subject is the agent runtime;
-Oracle Database 26ai is the storage layer. Embeddings live in a native
-`VECTOR(1536, FLOAT32)` column, similarity is the `VECTOR_DISTANCE` SQL
-function, and on first use the store creates the table together with a
-Hierarchical Navigable Small World (HNSW) vector index, `CREATE VECTOR
-INDEX ... ORGANIZATION INMEMORY NEIGHBOR GRAPH WITH DISTANCE COSINE`, the
-`OracleVectorStore` default. What the notebook shows is the agent deciding
-when to search, issuing a real tool call, and grounding its reply in what
-came back.
+An `Agent` that answers questions with retrieval-augmented generation (RAG) over Oracle Database 26ai. The subject is the agent runtime; Oracle Database 26ai is the storage layer.
+
+Embeddings live in a native `VECTOR(1536, FLOAT32)` column, similarity is the `VECTOR_DISTANCE` SQL function, and on first use the store creates the table together with a Hierarchical Navigable Small World (HNSW) vector index, `CREATE VECTOR INDEX ... ORGANIZATION INMEMORY NEIGHBOR GRAPH WITH DISTANCE COSINE`, the `OracleVectorStore` default.
+
+What the notebook shows is the agent deciding when to search, issuing a real tool call, and grounding its reply in what came back.
 
 What this notebook covers:
 
@@ -45,31 +40,17 @@ export OCI_COMPARTMENT=<compartment-ocid>
 export OCI_AUTH_TYPE=api_key                 # or security_token
 ```
 
-The notebook relies on the store's default `auto_create_table=True`, so
-the first run provisions the `locus_notebook_38` table, its HNSW vector
-index and a `created_at` index in the connecting user's schema, which
-needs data definition language (DDL) privileges there. For production,
-create the table and index out-of-band as the schema owner and pass
-`auto_create_table=False`, so the runtime user needs only data
-manipulation language (DML) privileges on the table. The
-`CREATE USER locus_app`, `CREATE TABLE` and `CREATE VECTOR INDEX`
-statements are in the
-[`OracleVectorStore` reference](../api/rag.md#locus.rag.stores.oracle.OracleVectorStore);
-for this notebook's embedder the column is `VECTOR(1536, FLOAT32)`, and
-the reference's index example uses the Inverted File (IVF) organisation,
-`ORGANIZATION NEIGHBOR PARTITIONS`, rather than the HNSW default; the
-store issues the same `VECTOR_DISTANCE` query against either.
+The notebook relies on the store's default `auto_create_table=True`, so the first run provisions the `locus_notebook_38` table, its HNSW vector index and a `created_at` index in the connecting user's schema, which needs data definition language (DDL) privileges there.
 
-Both lanes of the pipeline run here against one `OCIEmbeddings` embedder
-and one `OracleVectorStore`: seeding takes the ingest lane, embedding each
-of the six passages with `embed_documents()` and writing it to the
-`VECTOR(1536, FLOAT32)` table with `add_batch()`, and each question takes
-the retrieve lane, where the agent calls the search tool that
-`create_rag_tool(retriever)` built, the retriever embeds the query with
-the same embedder's `embed_query()`, Oracle Database 26ai ranks the rows
-with `VECTOR_DISTANCE` and the hits return to the agent with their
-content, score, metadata and id (no reranker is configured, so the ranked
-hits pass straight through):
+For production, create the table and index out-of-band as the schema owner and pass `auto_create_table=False`, so the runtime user needs only data manipulation language (DML) privileges on the table.
+
+The `CREATE USER locus_app`, `CREATE TABLE` and `CREATE VECTOR INDEX` statements are in the [`OracleVectorStore` reference](../api/rag.md#locus.rag.stores.oracle.OracleVectorStore).
+
+For this notebook's embedder the column is `VECTOR(1536, FLOAT32)`, and the reference's index example uses the Inverted File (IVF) organisation, `ORGANIZATION NEIGHBOR PARTITIONS`, rather than the HNSW default; the store issues the same `VECTOR_DISTANCE` query against either.
+
+Both lanes of the pipeline run here against one `OCIEmbeddings` embedder and one `OracleVectorStore`. Seeding takes the ingest lane, embedding each of the six passages with `embed_documents()` and writing it to the `VECTOR(1536, FLOAT32)` table with `add_batch()`.
+
+Each question takes the retrieve lane, where the agent calls the search tool that `create_rag_tool(retriever)` built, the retriever embeds the query with the same embedder's `embed_query()`, Oracle Database 26ai ranks the rows with `VECTOR_DISTANCE` and the hits return to the agent with their content, score, metadata and id (no reranker is configured, so the ranked hits pass straight through):
 
 {{ locus_diagram rag-pipeline }}
 
@@ -109,18 +90,11 @@ in `final_message`:
 python examples/notebook_38_oracle_26ai_rag.py
 ```
 
-The script needs two live services. Oracle Database 26ai is reached
-through `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` from Prerequisites,
-plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet
-is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a
-tnsnames alias. The embeddings come
-from Cohere `embed-v4.0` on OCI Generative AI, which needs
-`OCI_COMPARTMENT`; `OCI_PROFILE`, `OCI_REGION` and `OCI_AUTH_TYPE` default
-to `DEFAULT`, `us-chicago-1` and `api_key`, and the `LOCUS_OCI_*`
-equivalents take precedence when set. If any of the five required
-variables is missing the script prints a skip notice naming them, together
-with the minimal wiring snippet, and exits cleanly without opening a
-connection.
+The script needs two live services. Oracle Database 26ai is reached through `ORACLE_DSN`, `ORACLE_USER` and `ORACLE_PASSWORD` from Prerequisites, plus `ORACLE_WALLET` for mutual TLS (`ORACLE_WALLET_PASSWORD` when the wallet is encrypted) or `ORACLE_CONFIG_DIR` when a TLS-only database is named by a tnsnames alias.
+
+The embeddings come from Cohere `embed-v4.0` on OCI Generative AI, which needs `OCI_COMPARTMENT`; `OCI_PROFILE`, `OCI_REGION` and `OCI_AUTH_TYPE` default to `DEFAULT`, `us-chicago-1` and `api_key`, and the `LOCUS_OCI_*` equivalents take precedence when set.
+
+If any of the five required variables is missing the script prints a skip notice naming them, together with the minimal wiring snippet, and exits cleanly without opening a connection.
 
 The agent's chat model is the one piece that comes from
 `examples/config.py`: OCI Generative AI when `~/.oci/config` has a usable
