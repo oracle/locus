@@ -115,3 +115,13 @@ and a prompt is `low`, `medium` or `high` by which tier's reply passes.
 python scripts/router_difficulty.py \
   --tiers oci:<small-model> oci:<large-model> --judge oci:<judge-model> --repeats 3
 ```
+
+`router/train.json` is the split a classifier trains on: 390 labelled
+prompts, 30 per task type, none overlapping the corpus, which stays held
+out. `scripts/router_training_set.py` checks the split and writes it as
+training rows, each a prompt and the closed-vocabulary profile to emit for
+it.
+
+```bash
+python scripts/router_training_set.py --jsonl router-train.jsonl
+```
