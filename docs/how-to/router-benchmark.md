@@ -294,6 +294,80 @@ Three things to keep in mind when reading a measurement:
   case replaces the shared criterion for that prompt, for a request whose
   right answer is specific enough to state.
 
+## 7. The training split
+
+The routing corpus is the held-out set: a classifier is gated on it, so it
+never trains on it. `benchmarks/router/train.json` is the split to train
+on, built the same way. Each of its 390 cases states the frame its author
+intends, and the label is the protocol the compiler selects for that
+frame. Every task type has 30 prompts across the three difficulty levels,
+and 72 of them are traps.
+
+`load_router_training_set` holds the split to the corpus's rules and adds
+three of its own:
+
+| Check | Why |
+|---|---|
+| every case is `labelled` | a training row needs a stated frame |
+| no two cases share a prompt | a repeated row is counted twice |
+| no prompt overlaps a held-out prompt | a classifier gated on prompts it trained on has not been tested |
+
+Overlap is the share of words two prompts have in common
+(`prompt_overlap`); a pair at or above `threshold` (0.5 by default) is
+refused, and `near_duplicates` lists the pairs.
+
+A classifier is not trained to name a protocol. It is trained to emit a
+`RoutingProfile`, four fields from closed vocabularies:
+
+| Field | Values |
+|---|---|
+| `task_type` | the thirteen `TaskType` values |
+| `difficulty` | `low`, `medium`, `high` |
+| `risk` | `low`, `medium`, `high` |
+| `needs` | a subset of `tools`, `memory`, `code_generation`, `multi_agent`, `approval` |
+
+`RoutingProfile.to_frame()` turns a profile into the `GoalFrame` the
+compiler resolves, so the step from a profile to a shape is the
+deterministic one the router already runs. `training_examples` pairs each
+prompt with the profile its case stands for, and the needs follow from the
+stated frame by rule: `tools` when the case names capabilities,
+`code_generation` for a code-generation goal, `multi_agent` when the label
+is a protocol that runs several agents, `approval` when the policy gate
+holds the frame.
+
+```bash
+python scripts/router_training_set.py
+python scripts/router_training_set.py --jsonl router-train.jsonl
+```
+
+The script calls no model. It runs the checks above, confirms that every
+row's profile compiles to the protocol its label names, prints the cases
+per task type and difficulty, and with `--jsonl` writes one row a line:
+
+```json
+{"name": "train-diagnose-09-diagnose-the-slow-checkout", "prompt": "...",
+ "profile": {"task_type": "diagnose", "difficulty": "medium", "risk": "low",
+             "needs": ["tools", "multi_agent"]},
+ "protocol": "specialist_fanout", "trap": false, "measured_difficulty": null}
+```
+
+`protocol` is in the row as a check, not as a target. To carry the level
+an outcome measurement found, measure the split and pass the result:
+
+```bash
+python scripts/router_difficulty.py --corpus benchmarks/router/train.json \
+  --tiers oci:<small-model> oci:<large-model> --judge oci:<judge-model> --out difficulty.json
+python scripts/router_training_set.py --measured difficulty.json --jsonl router-train.jsonl
+```
+
+Each row then has `measured_difficulty` next to the stated one. The
+profile keeps the stated level, because the label follows from it; which
+of the two a classifier learns is the trainer's choice.
+
+A classifier trained on the split plugs into the benchmark through the
+classifier seam (`typed_target(model, classifier=...)`), and the gate holds
+it to the free-form baseline on the held-out corpus.
+
 ## From Python
 
 ```python

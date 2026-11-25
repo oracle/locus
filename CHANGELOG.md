@@ -8,6 +8,22 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **A training split for a router classifier.** `benchmarks/router/train.json`
+  holds 390 labelled prompts, 30 for each task type across the three
+  difficulty levels and 72 of them traps, built like the routing corpus: a
+  case states the frame its author intends and the label is the protocol the
+  compiler selects for it. The corpus stays the held-out set.
+  `locus.router.training.load_router_training_set` reads the split and refuses
+  an unlabelled case, a repeated prompt, or a prompt that overlaps a held-out
+  one. `RoutingProfile` is what a classifier is trained to emit (task type,
+  difficulty, risk and needs, each from a closed vocabulary, never a protocol
+  id), and `RoutingProfile.to_frame()` gives the frame the compiler resolves.
+  `training_examples` pairs each prompt with its profile, and
+  `scripts/router_training_set.py` checks the split and writes the rows as
+  JSON lines, with the level an outcome measurement found when one is passed.
+
 ## [6.6.2] - 2026-11-25
 
 ### Fixed
