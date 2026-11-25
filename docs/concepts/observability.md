@@ -304,8 +304,8 @@ The built-in table prices only some models, and lookup works like this:
 
 - Lookup strips the SDK's own provider prefixes (`openai:`, `anthropic:` and the OpenAI-compatible routing prefixes such as `vllm:` or `openrouter:`) and then needs an entry for the slug that remains.
 - A dated snapshot or `-latest` suffix resolves to its base slug, but a longer id never inherits a shorter entry's price.
-- An OCI id resolves the entry of the model it serves: `oci:openai.gpt-5.5` is `gpt-5.5`, so the `{{ locus_example_model }}` agent above reports a `cost_usd` from **OpenAI's list price** for that model. OCI bills at its own rates, which the table does not carry.
-- The Cohere, Meta, Google and xAI entries carry windows but no prices, so `cost_usd` is `None` on them.
+- An OCI id resolves the entry of the model it serves for its window and output cap only: `oci:openai.gpt-5.5` is `gpt-5.5` for token counting, but **its price is not OpenAI's list price**. OCI bills at its own rates, which the table does not carry, so `cost_usd` is `None` on every OCI id until you register the rate you are billed.
+- The Cohere, Meta, Google and xAI entries carry windows but no prices, so `cost_usd` is `None` on them through any spelling.
 
 To price a route at the rate it is actually billed, register that rate yourself:
 
@@ -313,7 +313,7 @@ To price a route at the rate it is actually billed, register that rate yourself:
 - The entry is stored under the id with its provider prefix stripped, so it is found under `{{ locus_example_model }}` and `openai.gpt-5.5` alike and wins over the built-in record.
 - Prices are read once, when the `Agent` is built.
 
-The same prices drive `max_cost_usd`: set a budget on an unpriced model and the `Agent` constructor raises `ValueError` rather than run a budget that could never stop anything. For dashboards, key on `agent_id` plus the same metrics the `TelemetryHook` already emits — no glue code needed.
+The same prices drive `max_cost_usd`: set a budget on an unpriced model and the `Agent` constructor raises `ValueError` rather than run a budget that could never stop anything. An `oci:` agent with a cost budget therefore needs a registered rate first. For dashboards, key on `agent_id` plus the same metrics the `TelemetryHook` already emits — no glue code needed.
 
 ## Export
 

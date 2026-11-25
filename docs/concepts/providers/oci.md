@@ -66,6 +66,12 @@ gets the default
 and counts tokens against the real window. A model with no entry yet
 takes one through `locus.models.metadata.register_metadata`.
 
+The entry's price does not carry over. OCI bills at its own rates, so on an
+`oci:` id `cost_usd` is `None` and `max_cost_usd` is refused until you
+register the rate you are billed under the full id; the
+[observability page](../observability.md#token-cost-already-on-every-result)
+has the recipe.
+
 ### Responses transport — `/openai/v1/responses` (opt-in)
 
 `OCIResponsesModel` calls the OpenAI-compatible Responses endpoint:

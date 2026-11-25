@@ -8,6 +8,23 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **An OCI Generative AI id is unpriced until you register its rate.** An
+  `oci:<vendor>.<model>` id resolves the catalogue entry of the model it
+  serves, and until now that brought the served model's list price with it:
+  an agent on `oci:openai.gpt-5.5` reported a `cost_usd` at OpenAI's rate,
+  and `max_cost_usd` stopped it against that figure. OCI bills at its own
+  rates, which the catalogue does not carry, so the figure was an estimate
+  wearing the look of a measurement. Through an OCI id the entry now carries
+  the window and output cap only: `cost_usd` is `None`, and an agent built
+  with `max_cost_usd` on an OCI id raises `ValueError` naming the fix. To keep
+  the budget, register the rate you are billed under the full id first:
+  `register_metadata(ModelMetadata(model_id="oci:openai.gpt-5.5", ...,
+  input_price_per_mtok=..., output_price_per_mtok=...))`. A registered rate
+  was already found first and keeps its prices; `openai:` ids and the other
+  providers are unchanged.
+
 ### Added
 
 - **A training split for a router classifier.** `benchmarks/router/train.json`
