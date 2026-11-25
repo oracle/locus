@@ -135,9 +135,10 @@ def test_same_sources_give_the_same_run_twice() -> None:
     assert build() == build()
 
 
-# The modules the agent loop runs. A direct clock, id or random read in one of
+# The modules the agent loop and the multi-agent shapes run. A direct clock, id
+# or random read in one of
 # them is invisible to an installed source, so a replaying host would diverge.
-_LOOP_PACKAGES = ("core", "agent")
+_LOOP_PACKAGES = ("core", "agent", "multiagent")
 _LOOP_MODULES = ("tools/executor.py",)
 _DIRECT_READS = {
     ("time", "time"),

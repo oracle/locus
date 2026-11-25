@@ -7,14 +7,13 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field, PrivateAttr
 
+from locus.core import sources
 from locus.core.messages import Message
 
 
@@ -42,7 +41,7 @@ class SwarmTask(BaseModel):
     fallback (see ``SwarmAgent.can_handle``).
     """
 
-    id: str = Field(default_factory=lambda: f"task_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"task_{sources.uuid4().hex[:8]}")
     description: str
     priority: int = 0  # Higher = more important
     required_tags: list[str] = Field(default_factory=list)
@@ -51,7 +50,7 @@ class SwarmTask(BaseModel):
     claimed_by: str | None = None
     result: str | None = None
     error: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = Field(default_factory=sources.now)
     completed_at: datetime | None = None
     parent_task_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -91,7 +90,7 @@ class SharedContext(BaseModel):
                     "key": key,
                     "value": value,
                     "agent_id": agent_id,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": sources.now().isoformat(),
                 }
             )
 
@@ -105,7 +104,7 @@ class SharedContext(BaseModel):
                     "key": key,
                     "message": message,
                     "agent_id": agent_id,
-                    "timestamp": datetime.now(UTC).isoformat(),
+                    "timestamp": sources.now().isoformat(),
                 }
             )
 
@@ -149,7 +148,7 @@ class SwarmAgent(BaseModel):
     Autonomously claims and works on tasks from the shared queue.
     """
 
-    id: str = Field(default_factory=lambda: f"agent_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"agent_{sources.uuid4().hex[:8]}")
     name: str
     capabilities: list[str] = Field(default_factory=list)
     system_prompt: str = ""
@@ -337,7 +336,7 @@ class Swarm(BaseModel):
     - Parallel execution with coordination
     """
 
-    id: str = Field(default_factory=lambda: f"swarm_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"swarm_{sources.uuid4().hex[:8]}")
     name: str = "Swarm"
 
     # Agents in the swarm
@@ -434,7 +433,7 @@ class Swarm(BaseModel):
                 else:
                     task.status = TaskStatus.COMPLETED
                     task.result = result
-                    task.completed_at = datetime.now(UTC)
+                    task.completed_at = sources.now()
                     completed_tasks.append(task)
 
                     # Record result in context
@@ -542,7 +541,7 @@ Provide a concise summary of the findings and conclusions."""
         Returns:
             SwarmResult with all completed work
         """
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
 
         # Add initial task if provided
         if initial_task:
@@ -613,7 +612,7 @@ Provide a concise summary of the findings and conclusions."""
             # Generate summary
             summary = await self._generate_summary()
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
 
             return SwarmResult(
                 swarm_id=self.id,
@@ -626,7 +625,7 @@ Provide a concise summary of the findings and conclusions."""
             )
 
         except Exception as e:  # noqa: BLE001
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             return SwarmResult(
                 swarm_id=self.id,
                 success=False,

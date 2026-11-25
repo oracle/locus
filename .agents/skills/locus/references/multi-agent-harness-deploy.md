@@ -572,7 +572,7 @@ thread_id=)`, `await pending_decision(workflow_id)`, `await signal_decided(workf
 A host that replays the loop itself installs its own clock, ids and random generator: `from locus.core import sources`,
 `sources.set_sources(obj)` with `now()`, `time()`, `monotonic()`, `uuid4()`, `uniform(a, b)` (subclass
 `sources.SystemSources`); it returns the previous sources, and `sources.reset_sources()` restores the system ones.
-`locus.core`, `locus.agent` and the tool executor read through it.
+`locus.core`, `locus.agent`, `locus.multiagent` and the tool executor read through it.
 
 `python -m locus.rogue` is a smoke test of the gate: an agent with dangerous tools behind
 `ControlPolicy(deny_for={"irreversible", "data-exfil"})`, reading one attack per line from stdin (`quit` ends it). With

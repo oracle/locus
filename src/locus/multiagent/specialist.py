@@ -6,12 +6,11 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING, Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from locus.core import sources
 from locus.core.events import SpecialistCompleteEvent, SpecialistStartEvent
 from locus.core.messages import Message
 from locus.core.state import AgentState
@@ -106,7 +105,7 @@ class Specialist(BaseModel):
     - Confidence-based execution
     """
 
-    id: str = Field(default_factory=lambda: f"specialist_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"specialist_{sources.uuid4().hex[:8]}")
     name: str
     specialist_type: str
     description: str
@@ -218,7 +217,7 @@ class Specialist(BaseModel):
             emit,
         )
 
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
 
         await emit(
             EV_SPECIALIST_STARTED,
@@ -280,7 +279,7 @@ class Specialist(BaseModel):
             # Extract confidence from response (simple heuristic)
             confidence = self._estimate_confidence(response.message.content or "")
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
 
             await emit(
                 EV_SPECIALIST_COMPLETED,
@@ -311,7 +310,7 @@ class Specialist(BaseModel):
             )
 
         except Exception as e:  # noqa: BLE001
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             await emit(
                 EV_SPECIALIST_COMPLETED,
                 specialist_id=self.id,

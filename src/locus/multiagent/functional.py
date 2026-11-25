@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
+
+from locus.core import sources
 
 
 @dataclass
@@ -104,7 +105,7 @@ def task(
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            start = time.perf_counter()
+            start = sources.monotonic()
 
             # Check cache
             if cache:
@@ -120,7 +121,7 @@ def task(
                     else:
                         result = func(*args, **kwargs)
 
-                    duration = (time.perf_counter() - start) * 1000
+                    duration = (sources.monotonic() - start) * 1000
                     _current_tasks.append(
                         TaskResult(
                             value=result,
@@ -139,7 +140,7 @@ def task(
                     if attempt < retry_attempts - 1:
                         await asyncio.sleep(0.1 * (attempt + 1))
 
-            duration = (time.perf_counter() - start) * 1000
+            duration = (sources.monotonic() - start) * 1000
             _current_tasks.append(
                 TaskResult(
                     duration_ms=duration,
@@ -193,7 +194,7 @@ def entrypoint(
             global _current_tasks
             _current_tasks = []
 
-            start = time.perf_counter()
+            start = sources.monotonic()
 
             try:
                 if asyncio.iscoroutinefunction(func):
@@ -201,7 +202,7 @@ def entrypoint(
                 else:
                     result = func(*args, **kwargs)
 
-                duration = (time.perf_counter() - start) * 1000
+                duration = (sources.monotonic() - start) * 1000
                 last_result[0] = EntrypointResult(
                     value=result,
                     tasks=list(_current_tasks),
@@ -210,7 +211,7 @@ def entrypoint(
                 return result
 
             except Exception as e:
-                duration = (time.perf_counter() - start) * 1000
+                duration = (sources.monotonic() - start) * 1000
                 last_result[0] = EntrypointResult(
                     tasks=list(_current_tasks),
                     duration_ms=duration,

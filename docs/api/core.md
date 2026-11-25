@@ -149,8 +149,8 @@ finally:
 
 The sources are process-wide and asked on every read, so sources that apply
 only in some contexts decide that per call. They cover `locus.core`,
-`locus.agent` and the tool executor; a tool, a checkpointer or a provider
-keeps its own clock.
+`locus.agent`, `locus.multiagent` and the tool executor; a tool, a
+checkpointer or a provider keeps its own clock.
 
 ::: locus.core.sources.RuntimeSources
 ::: locus.core.sources.SystemSources

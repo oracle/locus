@@ -7,12 +7,11 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from locus.core import sources
 from locus.core.messages import Message
 from locus.multiagent.specialist import Specialist, SpecialistResult
 
@@ -51,7 +50,7 @@ class Orchestrator(BaseModel):
     - Summarizes results into a coherent response
     """
 
-    id: str = Field(default_factory=lambda: f"orchestrator_{uuid4().hex[:8]}")
+    id: str = Field(default_factory=lambda: f"orchestrator_{sources.uuid4().hex[:8]}")
     name: str = "Orchestrator"
     description: str = ""
 
@@ -337,7 +336,7 @@ Include:
             emit,
         )
 
-        start_time = time.perf_counter()
+        start_time = sources.monotonic()
         decisions: list[RoutingDecision] = []
 
         try:
@@ -408,7 +407,7 @@ Include:
                 summary_length=len(summary or ""),
             )
 
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
 
             return OrchestratorResult(
                 orchestrator_id=self.id,
@@ -420,7 +419,7 @@ Include:
             )
 
         except Exception as e:  # noqa: BLE001
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            duration_ms = (sources.monotonic() - start_time) * 1000
             return OrchestratorResult(
                 orchestrator_id=self.id,
                 success=False,
