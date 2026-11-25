@@ -31,15 +31,9 @@ The headline value over the direct providers:
 
 ## Three transports under one prefix
 
-OCI Generative AI exposes its inference service in three ways: the
-OpenAI-compatible chat completions API, the OpenAI-compatible Responses
-API, and the native OCI Generative AI Python SDK. The SDK speaks all
-three. The `oci:` prefix **picks the transport from the model id** —
-Dedicated AI Cluster endpoints and Cohere models go through the SDK,
-every other id through the OpenAI-compatible chat API — so you don't
-have to know which transport a model uses to call it. The Responses
-transport is opt-in: the prefix never selects it. You can also pick any
-transport explicitly by instantiating its model class yourself.
+OCI Generative AI exposes its inference service in three ways: the OpenAI-compatible chat completions API, the OpenAI-compatible Responses API, and the native OCI Generative AI Python SDK. The SDK speaks all three.
+
+The `oci:` prefix **picks the transport from the model id** — Dedicated AI Cluster endpoints and Cohere models go through the SDK, every other id through the OpenAI-compatible chat API — so you don't have to know which transport a model uses to call it. The Responses transport is opt-in: the prefix never selects it. You can also pick any transport explicitly by instantiating its model class yourself.
 
 {{ locus_diagram oci-transports }}
 

@@ -69,15 +69,9 @@ backend.exec("make test", timeout=3600)   # stopped at 300 s
 
 ### Evidence hooks
 
-A hook receives an [`ExecRecord`](../harness.md#evidence) for every command
-the backend runs for a caller — the command and its output by SHA-256, the
-exit status, the duration, the backend label — whether or not the command
-came through a harness tool. The tools still publish their own records on
-the event bus; a hook is for whoever holds the backend: a runner's evidence
-ledger, a gateway, a test. A hook runs after the command; one that raises
-is logged and skipped, and the result still reaches the caller — the
-command ran, and a listener's failure must not make the caller run it
-again.
+A hook receives an [`ExecRecord`](../harness.md#evidence) for every command the backend runs for a caller — the command and its output by SHA-256, the exit status, the duration, the backend label — whether or not the command came through a harness tool. The tools still publish their own records on the event bus; a hook is for whoever holds the backend: a runner's evidence ledger, a gateway, a test.
+
+A hook runs after the command; one that raises is logged and skipped, and the result still reaches the caller — the command ran, and a listener's failure must not make the caller run it again.
 
 ```python
 records: list[ExecRecord] = []
@@ -256,24 +250,25 @@ backend = OCIContainerInstanceBackend.create(
 backend.close()                        # the instance is deleted
 ```
 
-`create()` generates an SSH key pair for this backend alone, in memory, and
-starts the container with a bootstrap command that installs `sshd` if the
-image lacks it, authorizes the key for `root`, creates the workspace,
-**prints the host's public keys to the container log** and runs `sshd` in
-the foreground. The backend reads the keys back through the service API and
-connects with them pinned, so there is no trust-on-first-use: a log without
-a key is an error, not an unverified connection. With `bastion_id`, a
-port-forwarding session to the instance's private IP is created with the
-same key pair and the connection is a channel through the bastion, with the
-bastion's host key pinned the same way: the key the service reports or — it
-reports none for a port-forwarding session — the one in your `known_hosts`,
-or else the key the endpoint presents at the first connection, read once and
-kept for the session (an `INFO` line says which); that is the shape for an
-instance in a private subnet, which is where a sandbox belongs. Without it, `public_ip=True` assigns a public IP on a public
-subnet, or the private IP is used as is for a process that can reach it.
-`known_hosts="accept-unknown"` is the explicit opt-in to connect anyway when
-the container or the bastion reports no key, with a warning; nothing is
-written to the user's `known_hosts` either way.
+`create()` generates an SSH key pair for this backend alone, in memory, and starts the container with a bootstrap command that:
+
+- installs `sshd` if the image lacks it
+- authorizes the key for `root`
+- creates the workspace
+- **prints the host's public keys to the container log**
+- runs `sshd` in the foreground
+
+The backend reads the keys back through the service API and connects with them pinned, so there is no trust-on-first-use: a log without a key is an error, not an unverified connection.
+
+With `bastion_id`, a port-forwarding session to the instance's private IP is created with the same key pair and the connection is a channel through the bastion, with the bastion's host key pinned the same way. The pinned key is:
+
+- the key the service reports (it reports none for a port-forwarding session)
+- or the one in your `known_hosts`
+- or else the key the endpoint presents at the first connection, read once and kept for the session
+
+An `INFO` line says which. That is the shape for an instance in a private subnet, which is where a sandbox belongs. Without `bastion_id`, `public_ip=True` assigns a public IP on a public subnet, or the private IP is used as is for a process that can reach it.
+
+`known_hosts="accept-unknown"` is the explicit opt-in to connect anyway when the container or the bastion reports no key, with a warning; nothing is written to the user's `known_hosts` either way.
 
 | Option | Default | What it does |
 | --- | --- | --- |
@@ -310,14 +305,9 @@ Prerequisites:
    `~/.oci/config` profile with an API key or a session token, an instance
    principal, or a resource principal.
 
-`stop()` stops the instance and `start()` starts it again; **the
-container's filesystem does not survive a stop** — the service restarts the
-container from its image, the bootstrap runs again and the backend
-reconnects to a fresh workspace, re-pinning the host keys of the new boot
-(the same keys, for an image that carries its own). `close()` on a running
-instance deletes it as it is, without stopping it first.
-`connect(instance_id, pkey=...)` attaches to an instance you provisioned
-yourself (one that runs `sshd` and accepts the key) and never deletes it.
+`stop()` stops the instance and `start()` starts it again; **the container's filesystem does not survive a stop** — the service restarts the container from its image, the bootstrap runs again and the backend reconnects to a fresh workspace, re-pinning the host keys of the new boot (the same keys, for an image that carries its own).
+
+`close()` on a running instance deletes it as it is, without stopping it first. `connect(instance_id, pkey=...)` attaches to an instance you provisioned yourself (one that runs `sshd` and accepts the key) and never deletes it.
 
 ## E2B and Daytona
 

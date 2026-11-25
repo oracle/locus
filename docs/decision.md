@@ -202,14 +202,9 @@ person.
 
 ## Thresholds belong to weights
 
-A threshold is worth something only if it was chosen on held-out data the head
-never trained on, and stated with a bound: *with probability at least 1 - delta,
-the miss rate at this threshold is at most alpha*. A Neyman–Pearson order
-statistic over the held-out positives gives exactly that, with no assumption
-about the model. The bound holds for the weights it was measured on and nothing
-else. Ship the threshold with the model; recalibrate when the model changes;
-and note that it covers ordinary traffic, not an adversary searching against
-the score. The escalate-only seams are what hold there.
+A threshold is worth something only if it was chosen on held-out data the head never trained on, and stated with a bound: *with probability at least 1 - delta, the miss rate at this threshold is at most alpha*. A Neyman–Pearson order statistic over the held-out positives gives exactly that, with no assumption about the model.
+
+The bound holds for the weights it was measured on and nothing else. Ship the threshold with the model; recalibrate when the model changes; and note that it covers ordinary traffic, not an adversary searching against the score. The escalate-only seams are what hold there.
 
 ## Per tenant
 

@@ -1,12 +1,8 @@
 # Benchmark the router
 
-The router's claim is structural: the model fills a typed `GoalFrame`, the
-registry picks the protocol, and nothing it says can name a shape outside
-the registered set. Its accuracy is a measurement, not a claim, and this
-page is how to take it. The benchmark asks one question of every prompt in
-a labelled corpus, "which protocol would be selected?", on the evaluation
-primitives: cases in a file, a runner, a report split per tag, a diff and a
-gate. Nothing is built or run; selection stops at the frame.
+The router's claim is structural: the model fills a typed `GoalFrame`, the registry picks the protocol, and nothing it says can name a shape outside the registered set. Its accuracy is a measurement, not a claim, and this page is how to take it.
+
+The benchmark asks one question of every prompt in a labelled corpus, "which protocol would be selected?", on the evaluation primitives: cases in a file, a runner, a report split per tag, a diff and a gate. Nothing is built or run; selection stops at the frame.
 
 ## 1. The corpus
 
@@ -28,15 +24,9 @@ selected (the frame was rejected, no protocol could take it, the provider
 failed). A refusal misses a label but is still bounded, which is the answer
 an adversarial prompt is allowed to get.
 
-A label is derivable, not a second opinion. Every labelled case states the
-frame its author intends in `metadata` (`expected_goal`,
-`expected_complexity`, `expected_risk` and, where the prompt names them,
-`capabilities`), and the label is the protocol the compiler selects for
-that frame; a unit test holds the file to it. The thirteen goals have
-thirteen or fourteen prompts each, spread over the three difficulties. The
-traps cover the nine goals whose canonical shape is not the low-cost one:
-a prompt that says plan, build, modify, diagnose, monitor, compare,
-coordinate, research or write code about work that is one step.
+A label is derivable, not a second opinion. Every labelled case states the frame its author intends in `metadata` (`expected_goal`, `expected_complexity`, `expected_risk` and, where the prompt names them, `capabilities`), and the label is the protocol the compiler selects for that frame; a unit test holds the file to it.
+
+The thirteen goals have thirteen or fourteen prompts each, spread over the three difficulties. The traps cover the nine goals whose canonical shape is not the low-cost one: a prompt that says plan, build, modify, diagnose, monitor, compare, coordinate, research or write code about work that is one step.
 
 The intended difficulty is the author's reading of the prompt. It is the
 hypothesis a difficulty measured from outcomes replaces, and the
@@ -210,16 +200,11 @@ python scripts/router_difficulty.py \
   --tiers oci:<small-model> oci:<large-model> --judge oci:<judge-model> --repeats 3
 ```
 
-The tiers are given cheapest first, two or more. The judge should be none
-of them: a model grading its own answer measures self-consistency. With
-three readings a tier passes a case only when every reading passed, and a
-tier whose model raised on any reading of a case decides nothing for it,
-whatever its other readings said: the case is `not_measured` unless a
-graded tier settled it, and the operator reruns. The
-script stores one report per tier (`router-difficulty-<tier>` suites in the
-report store), prints the intended level against the measured one with the
-traps on a row of their own, lists the cases where the two differ, and
-writes the measurement as JSON with `--out`.
+The tiers are given cheapest first, two or more. The judge should be none of them: a model grading its own answer measures self-consistency.
+
+With three readings a tier passes a case only when every reading passed, and a tier whose model raised on any reading of a case decides nothing for it, whatever its other readings said: the case is `not_measured` unless a graded tier settled it, and the operator reruns.
+
+The script stores one report per tier (`router-difficulty-<tier>` suites in the report store), prints the intended level against the measured one with the traps on a row of their own, lists the cases where the two differ, and writes the measurement as JSON with `--out`.
 
 ```python
 import asyncio

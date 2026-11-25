@@ -85,14 +85,24 @@ not need; files of yours in the skill directory are kept.
 
 ## What the skill teaches
 
-`SKILL.md` is the spine: what the SDK is, the working procedure (confirm the
-install, find the provider from the environment, read the reference, write
-the agent and an offline test, gate every side effect, never show a
-credential), the install matrix, a first agent, the gate with
-`gate_tool()` and `admit()`, holding for a person and resuming, typed
-answers and termination, how to pick a multi-agent shape, memory and RAG,
-the coding harness, offline tests with the model doubles, the command line,
-known behaviour, and the rules. The references carry the depth:
+`SKILL.md` is the spine:
+
+- what the SDK is
+- the working procedure (confirm the install, find the provider from the environment, read the reference, write the agent and an offline test, gate every side effect, never show a credential)
+- the install matrix
+- a first agent
+- the gate with `gate_tool()` and `admit()`
+- holding for a person and resuming
+- typed answers and termination
+- how to pick a multi-agent shape
+- memory and RAG
+- the coding harness
+- offline tests with the model doubles
+- the command line
+- known behaviour
+- the rules
+
+The references carry the depth:
 
 | Reference | Covers |
 |---|---|

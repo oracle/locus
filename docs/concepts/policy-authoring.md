@@ -329,32 +329,17 @@ Say, in the policy module itself:
 - which families it deliberately does not cover;
 - which controls it structurally cannot express.
 
-That last one matters more than it looks. Two of the first controls anyone
-asks for — *"at most $500 of refunds per day"* and *"five of these per
-hour"* — land on opposite sides of the line. Cumulative spend is expressible:
-`ControlPolicy(require_verification_score=0, spend_limit_usd=500, require_human_over_usd=100)`
-plus a `SpendLedger` (`FileSpendLedger` for one that survives a restart)
-holds any single action over $100 for a person and denies one that would take
-its scope past $500, and that deny is hard: no approval overrides it.
-(`require_verification_score=0` because the default bar holds every call that
-arrives without a verdict; see the note below.) Wire it with
-`gate_tool(..., action=..., ledger=ledger, spend_scope=...)`. `action` must
-set `Action.cost_usd` from the call's arguments, for example
-`lambda name, args: Action(name=name, cost_usd=args["amount_usd"])`. The
-default action costs nothing, so without it neither dollar rule ever fires and
-the ledger stays empty. `spend_scope` may be a callable, so *per day* means
-putting the date in the scope key; neither shipped ledger ever expires an
-entry. Spend is read before the call and recorded after it, not in one
-transaction, so two calls in flight against the same scope can both pass. That
-includes parallel tool calls from one agent turn, which run concurrently by
-default. Keep one call in flight per scope (for example
-`tool_execution="sequential"` on the agent, and one process per scope). A
-ledger cannot close the gap by itself: the gate asks it for the total before
-the call and reports the cost only after, so it never sees the pending amount.
-A rate limit is not expressible:
-`ControlPolicy` has no count-per-window rule, so *"five of these per hour"*
-still needs state you keep yourself. Naming the boundary is engineering
-judgment; letting a reader discover it is not.
+That last one matters more than it looks. Two of the first controls anyone asks for — *"at most $500 of refunds per day"* and *"five of these per hour"* — land on opposite sides of the line.
+
+Cumulative spend is expressible: `ControlPolicy(require_verification_score=0, spend_limit_usd=500, require_human_over_usd=100)` plus a `SpendLedger` (`FileSpendLedger` for one that survives a restart) holds any single action over $100 for a person and denies one that would take its scope past $500, and that deny is hard: no approval overrides it. (`require_verification_score=0` because the default bar holds every call that arrives without a verdict; see the note below.)
+
+Wire it with `gate_tool(..., action=..., ledger=ledger, spend_scope=...)`. `action` must set `Action.cost_usd` from the call's arguments, for example `lambda name, args: Action(name=name, cost_usd=args["amount_usd"])`. The default action costs nothing, so without it neither dollar rule ever fires and the ledger stays empty. `spend_scope` may be a callable, so *per day* means putting the date in the scope key; neither shipped ledger ever expires an entry.
+
+Spend is read before the call and recorded after it, not in one transaction, so two calls in flight against the same scope can both pass. That includes parallel tool calls from one agent turn, which run concurrently by default.
+
+Keep one call in flight per scope (for example `tool_execution="sequential"` on the agent, and one process per scope). A ledger cannot close the gap by itself: the gate asks it for the total before the call and reports the cost only after, so it never sees the pending amount.
+
+A rate limit is not expressible: `ControlPolicy` has no count-per-window rule, so *"five of these per hour"* still needs state you keep yourself. Naming the boundary is engineering judgment; letting a reader discover it is not.
 
 ## Guidance for the judge
 

@@ -80,17 +80,14 @@ text, not hidden chain-of-thought.
 
 ### Responses-only families: gpt-5.6, gpt-6 and the `-pro` models
 
-`OpenAIModel` speaks both OpenAI wire APIs. `api="auto"` (the default) sends
-chat-completions for everything except the families that chat-completions
-cannot serve: ids starting with `gpt-5.6` or `gpt-6` (`gpt-5.6-sol`,
-`gpt-6-sol`, `gpt-6.1-terra`, …) reject function tools whenever reasoning is
-active, and the `gpt-5*-pro` models (`gpt-5-pro`, `gpt-5.4-pro`,
-`gpt-5.5-pro`, …) are not chat models at all. The SDK routes all of them to
-`/v1/responses`. Auto-routing fires only when no `base_url` is passed to the
-model. With a custom `base_url` the request stays on chat-completions, because
-an OpenAI-compatible gateway typically does not serve the Responses path. A
-gateway set only through the `OPENAI_BASE_URL` environment variable is not
-detected, so pass `base_url` explicitly or set `api="chat_completions"`.
+`OpenAIModel` speaks both OpenAI wire APIs. `api="auto"` (the default) sends chat-completions for everything except the families that chat-completions cannot serve:
+
+- ids starting with `gpt-5.6` or `gpt-6` (`gpt-5.6-sol`, `gpt-6-sol`, `gpt-6.1-terra`, …) reject function tools whenever reasoning is active
+- the `gpt-5*-pro` models (`gpt-5-pro`, `gpt-5.4-pro`, `gpt-5.5-pro`, …) are not chat models at all
+
+The SDK routes all of them to `/v1/responses`.
+
+Auto-routing fires only when no `base_url` is passed to the model. With a custom `base_url` the request stays on chat-completions, because an OpenAI-compatible gateway typically does not serve the Responses path. A gateway set only through the `OPENAI_BASE_URL` environment variable is not detected, so pass `base_url` explicitly or set `api="chat_completions"`.
 
 Force either wire API with `api="responses"` / `api="chat_completions"`. It is
 a model argument, not an agent one, so `Agent(..., api=...)` raises. Build the

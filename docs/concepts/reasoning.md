@@ -112,15 +112,9 @@ print(summary["symptoms"])      # ['Checkout latency doubled']
 print(summary["conflicts"])     # count of contradictory edges detected
 ```
 
-The chain is a cause-effect graph — *X happened because Y; Y because
-Z* — that auto-classifies each node as root cause, intermediate, or
-symptom, and surfaces cycles and contradictions as the graph grows.
-The same builder reconstructs an attack chain just as well — phished
-credential → lateral movement → domain admin token.
-Particularly useful for incident triage where the linear chat log
-doesn't show that turn 3's "fix" contradicts turn 1's "root cause".
-`build_causal_chain()` is plain Python with no model call — feed it
-the events and read the structure back.
+The chain is a cause-effect graph — *X happened because Y; Y because Z* — that auto-classifies each node as root cause, intermediate, or symptom, and surfaces cycles and contradictions as the graph grows. The same builder reconstructs an attack chain just as well — phished credential → lateral movement → domain admin token.
+
+Particularly useful for incident triage where the linear chat log doesn't show that turn 3's "fix" contradicts turn 1's "root cause". `build_causal_chain()` is plain Python with no model call — feed it the events and read the structure back.
 
 ## Combining them
 

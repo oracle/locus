@@ -26,16 +26,15 @@ Responses transport is opt-in.
 | **Cohere** (`cohere.command-r*`, `cohere.command-a*`) | SDK | `OCIModel` | `/20231130/actions/chat` |
 | **Responses (opt-in)** — gpt-5.5-pro et al. | Responses | `OCIResponsesModel` | `/openai/v1/responses` |
 
-V1 is the default. It uses the standard `openai` SDK against
-OCI's OpenAI-compatible endpoint, gives you **real SSE streaming**
-(token-by-token), picks up new OCI models on day-0 with no SDK update,
-and uses the same OpenAI request shape for tool calls and system
-prompts. The OCI SDK transport remains the only option for Cohere
-models (Command R and Command A), which OCI does not expose on
-`/openai/v1` (it returns `400 Unsupported OpenAI operation`). The Responses transport is the
-only path that reaches Responses-only OCI models (`openai.gpt-5.5-pro`
-today) and the only one that lets OCI hold conversation state between
-turns via `previous_response_id` — both modes covered below.
+V1 is the default. It uses the standard `openai` SDK against OCI's OpenAI-compatible endpoint and:
+
+- gives you **real SSE streaming** (token-by-token)
+- picks up new OCI models on day-0 with no SDK update
+- uses the same OpenAI request shape for tool calls and system prompts
+
+The OCI SDK transport remains the only option for Cohere models (Command R and Command A), which OCI does not expose on `/openai/v1` (it returns `400 Unsupported OpenAI operation`).
+
+The Responses transport is the only path that reaches Responses-only OCI models (`openai.gpt-5.5-pro` today) and the only one that lets OCI hold conversation state between turns via `previous_response_id` — both modes covered below.
 
 One wrinkle on structured output: the Llama family answers a `json_schema`
 `response_format` without streaming it, so a streamed request carries an
@@ -163,18 +162,11 @@ model = OCIModel(
 )
 ```
 
-`OCIModel` uses the OCI Python SDK (`oci.generative_ai_inference`) and
-sends OCI's proprietary `CohereChatRequest` payload for every
-`cohere.command*` model — Command A included; OCI rejects the generic
-request shape for it with `400 Chat request type does not match serving
-model`. It supports the
-same five auth modes (`api_key`, `security_token`, `session_token`,
-`instance_principal`, `resource_principal`) but its argument names are
-different from `OCIChatCompletionsModel` — `model_id=`, `profile_name=`,
-`compartment_id=`, `auth_type=` as an enum / string. `stream()` on this
-transport requests SSE (`is_stream=True` on the chat request) and
-iterates the events; if the endpoint rejects the streaming request it
-falls back to `complete()` and yields the full response as one chunk.
+`OCIModel` uses the OCI Python SDK (`oci.generative_ai_inference`) and sends OCI's proprietary `CohereChatRequest` payload for every `cohere.command*` model — Command A included; OCI rejects the generic request shape for it with `400 Chat request type does not match serving model`.
+
+It supports the same five auth modes (`api_key`, `security_token`, `session_token`, `instance_principal`, `resource_principal`) but its argument names are different from `OCIChatCompletionsModel` — `model_id=`, `profile_name=`, `compartment_id=`, `auth_type=` as an enum / string.
+
+`stream()` on this transport requests SSE (`is_stream=True` on the chat request) and iterates the events; if the endpoint rejects the streaming request it falls back to `complete()` and yields the full response as one chunk.
 
 ## String factory (`get_model("oci:...")`) auto-routes
 

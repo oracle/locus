@@ -125,14 +125,9 @@ result = await desk.execute("Recommend how to resolve the duplicate charge on or
 
 ## Control — grounding, gating, audit
 
-One chain — grounding, gating, audit — applies to any domain: a claim graded by
-`ground_finding()` becomes evidence only when it clears the GSAR threshold, a
-side effect routed through `admit()` runs only on an allow decision or on a hold
-a named person approves, and `admit()` records every decision it makes (allowed,
-held or denied) on the trail you pass. What it cannot do is gate a side effect
-that never passes through it, or classify your actions for you — an action left
-labelled `environment="staging"` never matches a policy that holds production,
-so see [Guarantees and boundaries](why-locus.md).
+One chain — grounding, gating, audit — applies to any domain: a claim graded by `ground_finding()` becomes evidence only when it clears the GSAR threshold, a side effect routed through `admit()` runs only on an allow decision or on a hold a named person approves, and `admit()` records every decision it makes (allowed, held or denied) on the trail you pass.
+
+What it cannot do is gate a side effect that never passes through it, or classify your actions for you — an action left labelled `environment="staging"` never matches a policy that holds production, so see [Guarantees and boundaries](why-locus.md).
 
 {{ locus_diagram grounded-findings }}
 
