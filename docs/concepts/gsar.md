@@ -17,9 +17,12 @@ grounded; the *conclusion* over-reaches.
 is the upgrade. It
 breaks the synthesis into claims, partitions them four ways, scores
 the partition with per-evidence-type weights, and picks one of three
-responses: `proceed` if the synthesis holds up, `regenerate` if the
-evidence is fine but the wording is loose (rewrites without re-running
-tools), or `replan` if the evidence itself is missing or contradicted.
+responses:
+
+- `proceed` if the synthesis holds up.
+- `regenerate` if the evidence is fine but the wording is loose (rewrites without re-running tools).
+- `replan` if the evidence itself is missing or contradicted.
+
 The math is small (one equation), the integration is one Pydantic
 type, and six properties of the scoring function are formally provable. Those
 properties describe the arithmetic after a partition is supplied; they do not

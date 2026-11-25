@@ -33,7 +33,9 @@ The classes in that `match` belong to the first of two event
 families. The drawing below sets them beside the dotted `event_type`
 names the event bus carries (`"think"` on the typed event,
 `agent.think` on the bus) and shows the bridge that turns the first
-family into the second. Its two typed lanes are scoped to what
+family into the second.
+
+Its two typed lanes are scoped to what
 `agent.run()` yields; the multi-agent and causal classes further down
 this page are declared in the same module, but `agent.run()` never
 yields them — the specialist lifecycle reaches the bus as

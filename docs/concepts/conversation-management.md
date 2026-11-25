@@ -35,15 +35,16 @@ agent.run_sync("What did we conclude?",                           thread_id="tic
 # → "The return on ord-4821 is eligible. Want me to draft the refund for manager approval?"
 ```
 
-The `thread_id` is the unit of conversation. With `checkpointer=`
-alone, state is saved when the run finishes or raises, before the
-agent pauses on an interrupt and — for a run with a `thread_id` on a
-checkpointer that can delete a single checkpoint, as every backend on
-the [Checkpointers](checkpointers.md) page can — at the end of each
-loop iteration that executes tool calls, so a process that dies
-mid-run keeps its progress up to the last such save; pass
-`checkpoint_every_n_iterations=0` to keep only the end-of-turn and
-interrupt saves. A run continued with `agent.resume(...)` or
+The `thread_id` is the unit of conversation. With `checkpointer=` alone, state is saved:
+
+- when the run finishes or raises;
+- before the agent pauses on an interrupt;
+- for a run with a `thread_id` on a checkpointer that can delete a single checkpoint, as every backend on the [Checkpointers](checkpointers.md) page can — at the end of each loop iteration that executes tool calls, so a process that dies mid-run keeps its progress up to the last such save.
+
+Pass `checkpoint_every_n_iterations=0` to keep only the end-of-turn and
+interrupt saves.
+
+A run continued with `agent.resume(...)` or
 `agent.continue_turn(...)` saves on the same schedule as a fresh run:
 after each tool-calling iteration, and when it finishes, raises, or
 pauses again. Every fresh `agent.run_sync(..., thread_id=...)` call
@@ -127,21 +128,25 @@ bug — you'll race on the checkpoint. Three patterns to avoid that:
 
 After dozens of turns, even the most disciplined conversation
 exceeds the model's context window, so an agent manages its context
-by default. With no `conversation_manager`, an agent whose model's
-window is known (`context_window=`, registered metadata — a built-in
-entry, one an OCI id such as `oci:openai.gpt-4.1` resolves through the
-model it serves, or one you add with
-`locus.models.metadata.register_metadata` — or the model itself) gets a
-`ContextCompactor`: old tool output is
-cleared first and, when that is not enough, older turns are summarised
-by the agent's own model (or `compaction.summary_model`) and the run
-carries on. With `compaction=False` it gets
-`LLMCompactor(context_length=<model window>)` with no summariser
-instead: stale tool output is pruned and a token-budgeted tail is
-kept, with no extra model calls. When the window is unknown, the agent
-falls back to `SlidingWindowManager(window_size=max(20, max_iterations * 2))`.
-Pass `NullManager()` to turn management off. For a run that needs more
-stages than clear-then-summarise, see [Tiered compaction](#tiered-compaction)
+by default.
+
+With no `conversation_manager`, an agent whose model's window is known gets a `ContextCompactor`. The window is known from:
+
+- `context_window=`;
+- registered metadata — a built-in entry, one an OCI id such as `oci:openai.gpt-4.1` resolves through the model it serves, or one you add with `locus.models.metadata.register_metadata`;
+- or the model itself.
+
+In the `ContextCompactor`, old tool output is cleared first and, when that
+is not enough, older turns are summarised by the agent's own model (or
+`compaction.summary_model`) and the run carries on.
+
+The other cases:
+
+- With `compaction=False` it gets `LLMCompactor(context_length=<model window>)` with no summariser instead: stale tool output is pruned and a token-budgeted tail is kept, with no extra model calls.
+- When the window is unknown, the agent falls back to `SlidingWindowManager(window_size=max(20, max_iterations * 2))`.
+- Pass `NullManager()` to turn management off.
+
+For a run that needs more stages than clear-then-summarise, see [Tiered compaction](#tiered-compaction)
 below.
 
 A model whose provider compacts threads itself can take the summary
@@ -156,11 +161,15 @@ it, or a failed call, summarises as usual.
 Native compaction pays off when the bulk of the history is assistant or
 tool output: that is what the endpoint folds into its encrypted
 `compaction` item, while the user messages a continuation needs are kept
-as they are. The item itself (a few KB) rides on an assistant message's
+as they are.
+
+The item itself (a few KB) rides on an assistant message's
 metadata and goes out with every later request, and the default token
 counter charges for it, so `tokens_after` and the replayed request move
 together (the count is of what goes on the wire; the endpoint's own
-`prompt_tokens` for the item can be lower). On a transcript that is
+`prompt_tokens` for the item can be lower).
+
+On a transcript that is
 mostly user messages the stage can
 leave the history about as large as it found it; the client-side summary
 is the better fit there.
@@ -169,13 +178,19 @@ is the better fit there.
 
 A long coding or research run does better with a pipeline than with two
 stages: drop what is cheap to drop first, and spend a model call only
-when that was not enough. `TieredCompaction` runs tiers in order, each
+when that was not enough.
+
+`TieredCompaction` runs tiers in order, each
 with its own **trigger**, a fraction of the usable window (the model's
-window minus the room reserved for the reply). Before each model call
+window minus the room reserved for the reply).
+
+Before each model call
 the context is measured; a tier runs only while the context is at or
 over its trigger, the context is measured again after it, and a tier
 that changes nothing is skipped, so a cheap tier that bought enough room
-stops the pipeline before an expensive one runs. The window comes from
+stops the pipeline before an expensive one runs.
+
+The window comes from
 the model's metadata entry; `context_length=` names it when the model
 has none, and wins when both are given.
 
@@ -220,7 +235,9 @@ Every tier that ran yields its own `CompactionEvent`, with `tier` set and
 the tokens before and after it (`agent.context.compacted` on the
 [event bus](sse-events.md)). The pipeline reports `exhausted` when the
 context is still at or over the highest trigger after the last tier; the
-run then ends with `context_exhausted`. A model-calling tier needed again
+run then ends with `context_exhausted`.
+
+A model-calling tier needed again
 within `min_iterations_between_summaries` iterations of its last run is
 held back for that pass (the last summary did not buy room, so another
 would land in the same place) and the tiers after it still run, so a
@@ -255,8 +272,9 @@ conversation to stay available. `ToolResultOffload` moves any tool result
 over `threshold_chars` (16,000) into a `ToolResultStore` the moment it is
 produced; the message the model reads keeps a handle and the first
 `preview_chars` (2,000), and the `fetch_tool_result` tool, registered
-with the offload, reads the stored text back a page at a time. The
-handle lives in the message text, so it survives a checkpoint round trip
+with the offload, reads the stored text back a page at a time.
+
+The handle lives in the message text, so it survives a checkpoint round trip
 and every compaction tier (a cleared stub names it): an offloaded result
 is referenced, never lost.
 

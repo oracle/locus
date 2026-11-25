@@ -1,16 +1,14 @@
 # Checkpointers
 
-A checkpointer is the contract for **persisting agent state** between
-runs. Pass one to `Agent(checkpointer=...)` and the agent saves
-`AgentState` at three points: when the run finishes or raises; before
-it pauses on an interrupt; and, on a checkpointer that can delete a
-single checkpoint, after each tool-calling iteration.
-`checkpoint_every_n_iterations` sets that last interval, and the turn's
-final save deletes the iteration saves it supersedes. The
-[durability mode](#durability-modes) decides whether those iteration
-saves are awaited, written in the background, or skipped. Resume a
-thread by re-running with the same `thread_id`: same code, same case
-context, different process, different day.
+A checkpointer is the contract for **persisting agent state** between runs. Pass one to `Agent(checkpointer=...)` and the agent saves `AgentState` at three points:
+
+- when the run finishes or raises;
+- before it pauses on an interrupt;
+- and, on a checkpointer that can delete a single checkpoint, after each tool-calling iteration.
+
+`checkpoint_every_n_iterations` sets that last interval, and the turn's final save deletes the iteration saves it supersedes. The [durability mode](#durability-modes) decides whether those iteration saves are awaited, written in the background, or skipped.
+
+Resume a thread by re-running with the same `thread_id`: same code, same case context, different process, different day.
 
 This is the continuity story for production agents. A case outlives a
 process: a refund case opens Friday, the service redeploys over the
@@ -89,18 +87,11 @@ saves.
 | `"async"` | Scheduled on the event loop while the next model call runs; every pending write is awaited before the final save. | The writes still in flight. | Many short iterations on a remote checkpointer; the thread's history still fills in. |
 | `"exit"` | None. One save at the end of the run (and before a pause). | Everything since the previous checkpoint. | Short runs, cheap tools, or a backend billed per write. |
 
-The two cheaper modes have a window the default does not: a process
-killed after a tool returned but before the run's next save leaves no
-checkpoint of that call, and a resumed run would issue it again. The
-[tool-effect ledger](idempotency.md#the-tool-effect-ledger) closes it:
-with `durability="async"` or `"exit"` the executor records every
-executed call in the thread's checkpointer the moment it returns (one
-small write per call, under the sidecar thread `<thread_id>~ledger`),
-and `agent.continue_turn(thread_id)` or
-`agent.resume(invocation_id=..., thread_id=...)` replays the recorded
-results instead of running the tools again. `Agent(tool_ledger=True)`
-turns the ledger on for `"sync"` too, closing its smaller window at the
-same per-call cost; `tool_ledger=False` turns it off everywhere.
+The two cheaper modes have a window the default does not: a process killed after a tool returned but before the run's next save leaves no checkpoint of that call, and a resumed run would issue it again.
+
+The [tool-effect ledger](idempotency.md#the-tool-effect-ledger) closes it: with `durability="async"` or `"exit"` the executor records every executed call in the thread's checkpointer the moment it returns (one small write per call, under the sidecar thread `<thread_id>~ledger`), and `agent.continue_turn(thread_id)` or `agent.resume(invocation_id=..., thread_id=...)` replays the recorded results instead of running the tools again.
+
+`Agent(tool_ledger=True)` turns the ledger on for `"sync"` too, closing its smaller window at the same per-call cost; `tool_ledger=False` turns it off everywhere.
 
 ```python
 agent = Agent(model=..., tools=[...], checkpointer=cp, durability="async")
@@ -132,21 +123,13 @@ localhost; your network to the database sets the real scale.
 | | `async` | 1.7 ms | 2.4 ms |
 | | `exit` | 0.5 ms | 1.5 ms |
 
-How to read it. The left column is the cost of the checkpoint schedule
-alone: `sync` pays the awaited write every iteration, `async` hides most
-of it behind the next model call, `exit` pays nothing until the end. The
-right column adds one ledger record per tool call — about 2 ms through
-the adapter, whose every save is four statements (the record, a `latest`
-row, an index read and write) whatever the payload, and about 1 ms on
-`PgCheckpointer`, whose save is one upsert. So on PostgreSQL
-`async` with the ledger costs what `sync` without it costs through the
-adapter, and `exit` with the ledger costs less than `async` without it;
-on `PgCheckpointer` every combination is cheaper than the adapter's
-default. In memory nothing registers. The ledger also writes a manifest
-once per turn and deletes the sidecar once at the end. With a real model
-call of a second or more per iteration, none of these numbers is visible;
-they matter for tight tool loops on a remote database and for backends
-billed per write.
+How to read it. The left column is the cost of the checkpoint schedule alone: `sync` pays the awaited write every iteration, `async` hides most of it behind the next model call, `exit` pays nothing until the end.
+
+The right column adds one ledger record per tool call — about 2 ms through the adapter, whose every save is four statements (the record, a `latest` row, an index read and write) whatever the payload, and about 1 ms on `PgCheckpointer`, whose save is one upsert.
+
+So on PostgreSQL `async` with the ledger costs what `sync` without it costs through the adapter, and `exit` with the ledger costs less than `async` without it; on `PgCheckpointer` every combination is cheaper than the adapter's default. In memory nothing registers. The ledger also writes a manifest once per turn and deletes the sidecar once at the end.
+
+With a real model call of a second or more per iteration, none of these numbers is visible; they matter for tight tool loops on a remote database and for backends billed per write.
 
 ## Time travel
 
@@ -184,58 +167,34 @@ async def what_if() -> None:
     await agent.arun("Hold the refund.", thread_id="case-4821", from_checkpoint=opened.checkpoint_id)
 ```
 
-`cp.list(thread_id, limit=10)` returns `CheckpointInfo` records, newest
-first: `checkpoint_id`, `thread_id`, `created_at`, the `iteration` the
-state had reached, the `size` of the checkpoint in bytes as that backend
-stores it (the serialised state as compact JSON for most backends, the
-stored row's text for `PgCheckpointer`'s `jsonb` — compare sizes within
-one backend, not across them), the `parent_checkpoint_id` it descends
-from, `forked_from` (the thread the parent lives in, for a fork's first
-checkpoint) and the `metadata` it was saved with. The parent is
-recorded in the checkpoint's metadata when the writer knew it was not
-the thread's previous checkpoint — a fork's first checkpoint, an
-`update_state` of an older checkpoint, the first lasting save of a run
-started `from_checkpoint=` — and is the previous checkpoint everywhere
-else, since a thread's history is otherwise a line. Only a thread's
-first checkpoint has no parent: with a `limit`, the oldest checkpoint
-described still names the one before it.
+`cp.list(thread_id, limit=10)` returns `CheckpointInfo` records, newest first, with these fields:
 
-`cp.fork(thread_id, checkpoint_id=None, *, new_thread_id=None)` saves the
-state at that checkpoint (the latest by default) as the first checkpoint
-of a new thread (`<thread_id>-fork-<8 hex>` unless named) and returns
-the new thread's id. `Agent.fork` and `StateGraph.afork` call it. A
-fork takes the thread's
-[tool-effect ledger](idempotency.md#the-tool-effect-ledger) with it
-**up to the forked checkpoint's iteration and no further**: the records
-of calls the forked state already holds are copied, re-keyed under the
-new thread, and the records of what the parent did past the fork point
-are not, so a run on the fork — even one continuing the same
-`invocation_id` — replays nothing from beyond the fork.
+- `checkpoint_id`, `thread_id`, `created_at`;
+- the `iteration` the state had reached;
+- the `size` of the checkpoint in bytes as that backend stores it (the serialised state as compact JSON for most backends, the stored row's text for `PgCheckpointer`'s `jsonb` — compare sizes within one backend, not across them);
+- the `parent_checkpoint_id` it descends from, `forked_from` (the thread the parent lives in, for a fork's first checkpoint) and the `metadata` it was saved with.
 
-`agent.run(prompt, thread_id=..., from_checkpoint=...)` (also `arun`,
-`run_sync`) starts the turn from the thread's state at that checkpoint
-instead of its latest; `agent.resume(response, thread_id=...,
-from_checkpoint=...)` continues a *paused* turn from the checkpoint it
-paused on, discarding any later answer — the way to answer a question
-differently. Both need `thread_id` and a checkpointer, raise
-`LookupError` for a checkpoint the thread does not have, and record the
-checkpoint as the parent of the run's first lasting save — the run's
-later saves follow on from that one, so the branch is a chain in `list`
-and in the drawing below, not a star. The checkpoints written after the
-branch point stay, and the checkpoint the run started from is never
-deleted, even when it is an iteration save of a turn that did not
-finish; nothing is deleted.
+The parent is recorded in the checkpoint's metadata when the writer knew it was not the thread's previous checkpoint — a fork's first checkpoint, an `update_state` of an older checkpoint, the first lasting save of a run started `from_checkpoint=` — and is the previous checkpoint everywhere else, since a thread's history is otherwise a line.
 
-`draw_mermaid_history(cp, *thread_ids)`
-(`locus.multiagent.visualize`; `StateGraph.adraw_mermaid_history` for a
-graph's threads) renders the histories as one Mermaid flowchart: a lane
-per thread, oldest checkpoint first, an arrow from each checkpoint to the
-ones that descend from it, and — when a thread and its fork are both
-given — a dashed `fork` arrow from the checkpoint the fork was taken at,
-so the fork reads as a branch of its parent. Node ids are the thread and
-checkpoint ids made safe for Mermaid; one that needed a character
-replaced carries a short hash of the original, so `a-b` and `a_b` never
-share a node, and labels show the ids as they are.
+Only a thread's first checkpoint has no parent: with a `limit`, the oldest checkpoint described still names the one before it.
+
+`cp.fork(thread_id, checkpoint_id=None, *, new_thread_id=None)` saves the state at that checkpoint (the latest by default) as the first checkpoint of a new thread (`<thread_id>-fork-<8 hex>` unless named) and returns the new thread's id. `Agent.fork` and `StateGraph.afork` call it.
+
+A fork takes the thread's [tool-effect ledger](idempotency.md#the-tool-effect-ledger) with it **up to the forked checkpoint's iteration and no further**: the records of calls the forked state already holds are copied, re-keyed under the new thread, and the records of what the parent did past the fork point are not, so a run on the fork — even one continuing the same `invocation_id` — replays nothing from beyond the fork.
+
+`agent.run(prompt, thread_id=..., from_checkpoint=...)` (also `arun`, `run_sync`) starts the turn from the thread's state at that checkpoint instead of its latest; `agent.resume(response, thread_id=..., from_checkpoint=...)` continues a *paused* turn from the checkpoint it paused on, discarding any later answer — the way to answer a question differently.
+
+Both need `thread_id` and a checkpointer, raise `LookupError` for a checkpoint the thread does not have, and record the checkpoint as the parent of the run's first lasting save — the run's later saves follow on from that one, so the branch is a chain in `list` and in the drawing below, not a star.
+
+The checkpoints written after the branch point stay, and the checkpoint the run started from is never deleted, even when it is an iteration save of a turn that did not finish; nothing is deleted.
+
+`draw_mermaid_history(cp, *thread_ids)` (`locus.multiagent.visualize`; `StateGraph.adraw_mermaid_history` for a graph's threads) renders the histories as one Mermaid flowchart:
+
+- a lane per thread, oldest checkpoint first;
+- an arrow from each checkpoint to the ones that descend from it;
+- and — when a thread and its fork are both given — a dashed `fork` arrow from the checkpoint the fork was taken at, so the fork reads as a branch of its parent.
+
+Node ids are the thread and checkpoint ids made safe for Mermaid; one that needed a character replaced carries a short hash of the original, so `a-b` and `a_b` never share a node, and labels show the ids as they are.
 
 ```text
 graph LR
@@ -276,21 +235,16 @@ on a replay.
 | `OracleCheckpointSaver` (the reference: one row per checkpoint with `parent_checkpoint_id` kept on the row) | one row per `put` | one query; the rows carry their data | none built in (`delete_thread`) | one row |
 | `HTTPCheckpointer`, your own `BaseCheckpointer` subclass | whatever the store keeps | the base default: each state is loaded to read its iteration and size, `get_metadata` for the rest when the backend has it | none unless you add one | the store's |
 
-Through the adapter factories, each save or removal changes the index in
-one operation the store makes atomic — a Redis hash field (`HSET` /
-`HDEL`), one `UPDATE` of the index row's JSON array on PostgreSQL and
-MySQL, one scripted `_update` of the index document on OpenSearch, a
-rewrite of the index row under its row lock (`SELECT ... FOR UPDATE`) on
-Oracle — so two processes saving to the same thread at once both keep
-every entry. An index an earlier release wrote on Redis is read as before
-and moved into the hash on the thread's next save or removal; reading
-those strings ends in 7.0.0, and a process still on the earlier release
-lists only the checkpoints it wrote itself after the move, so upgrade the
-processes that share one Redis store together. A backend of your own
-without those operations updates the index under a per-process lock:
-safe within one process, not between processes. One that implements
-only some of the four methods gets a `LocusWarning` when the adapter is
-built, and the same lock.
+Through the adapter factories, each save or removal changes the index in one operation the store makes atomic, so two processes saving to the same thread at once both keep every entry:
+
+- a Redis hash field (`HSET` / `HDEL`);
+- one `UPDATE` of the index row's JSON array on PostgreSQL and MySQL;
+- one scripted `_update` of the index document on OpenSearch;
+- a rewrite of the index row under its row lock (`SELECT ... FOR UPDATE`) on Oracle.
+
+An index an earlier release wrote on Redis is read as before and moved into the hash on the thread's next save or removal; reading those strings ends in 7.0.0, and a process still on the earlier release lists only the checkpoints it wrote itself after the move, so upgrade the processes that share one Redis store together.
+
+A backend of your own without those operations updates the index under a per-process lock: safe within one process, not between processes. One that implements only some of the four methods gets a `LocusWarning` when the adapter is built, and the same lock.
 
 A bounded backend deletes the surplus from the oldest end after every
 save — several saves within one second included — so `fork` and `list`
@@ -327,22 +281,11 @@ agent.run_sync("Open ticket T-4821.", thread_id="case-4821", scope=CheckpointSco
 
 ### TTL
 
-`ttl=` (seconds or a `timedelta`) gives every checkpoint an expiry,
-recorded at the save as `expires_at` beside the checkpoint — in the
-in-memory record, in a file's header, in the adapter's index entry and
-document, in a bucket's `.meta.json` and payload, in an `expires_at`
-column on PostgreSQL, MySQL and `PgCheckpointer`. A table made before
-the column existed is only probed on start; the first save that carries
-an expiry adds the column (`ALTER TABLE … ADD COLUMN IF NOT EXISTS` on
-PostgreSQL; MySQL has no `IF NOT EXISTS` for columns, so the probe
-decides), and a role that may not alter the table is told once, in one
-line, and expiry is kept in the documents. A checkpointer without a
-`ttl` never alters a table it did not create, and filters on the column
-only where it exists. Every read filters on the recorded expiry: an
-expired checkpoint is not loaded, listed or forked, whether or not the
-store has removed it yet, so a thread whose last turn is older than the
-TTL starts afresh. The tool-effect ledger's sidecar expires with its
-thread.
+`ttl=` (seconds or a `timedelta`) gives every checkpoint an expiry, recorded at the save as `expires_at` beside the checkpoint — in the in-memory record, in a file's header, in the adapter's index entry and document, in a bucket's `.meta.json` and payload, in an `expires_at` column on PostgreSQL, MySQL and `PgCheckpointer`.
+
+A table made before the column existed is only probed on start; the first save that carries an expiry adds the column (`ALTER TABLE … ADD COLUMN IF NOT EXISTS` on PostgreSQL; MySQL has no `IF NOT EXISTS` for columns, so the probe decides), and a role that may not alter the table is told once, in one line, and expiry is kept in the documents. A checkpointer without a `ttl` never alters a table it did not create, and filters on the column only where it exists.
+
+Every read filters on the recorded expiry: an expired checkpoint is not loaded, listed or forked, whether or not the store has removed it yet, so a thread whose last turn is older than the TTL starts afresh. The tool-effect ledger's sidecar expires with its thread.
 
 Checkpointers with different `ttl`s may write to one thread. A
 checkpoint keeps the expiry it was saved with; what the thread shares —
@@ -352,18 +295,11 @@ lengthens the index's `EXPIRE` (a writer without a `ttl` makes it
 persist), and a `load()` of the latest falls back to the newest live
 checkpoint when the pointer names an expired one.
 
-`await cp.expire()` removes what has expired and returns how many
-checkpoints went; call it from a scheduler as often as the store's size
-warrants. Where the store expires keys itself the sweep has little to
-do: `redis_checkpointer(ttl=…)` sets Redis's own `EXPIRE` (whole
-seconds) on every key a thread writes — each checkpoint, the `latest`
-copy, the index hash and the ledger sidecar — so the keys vanish on
-their own. On object storage the objects carry no expiry of their own;
-`expire()` lists the prefix and deletes the expired pairs, or a bucket
-lifecycle rule does it server-side. An instance without a `ttl` still
-never loads an expired checkpoint (and `exists()` is false for one), but
-lists one on S3 and OCI until `expire()` runs, since telling takes a
-read of each `.meta.json`.
+`await cp.expire()` removes what has expired and returns how many checkpoints went; call it from a scheduler as often as the store's size warrants.
+
+Where the store expires keys itself the sweep has little to do: `redis_checkpointer(ttl=…)` sets Redis's own `EXPIRE` (whole seconds) on every key a thread writes — each checkpoint, the `latest` copy, the index hash and the ledger sidecar — so the keys vanish on their own.
+
+On object storage the objects carry no expiry of their own; `expire()` lists the prefix and deletes the expired pairs, or a bucket lifecycle rule does it server-side. An instance without a `ttl` still never loads an expired checkpoint (and `exists()` is false for one), but lists one on S3 and OCI until `expire()` runs, since telling takes a read of each `.meta.json`.
 
 ### Encryption at rest
 
@@ -377,20 +313,11 @@ and decryption, so a vault or key-management fetch plugs in (cache
 inside it if the fetch is slow). The `cryptography` package does the
 work: `pip install "locus-sdk[encryption]"`.
 
-What is stored is a versioned envelope, `{"v": 1, "alg": "A256GCM",
-"kid": …, "nonce": …, "ct": …, "iteration": …}`. `kid` is a fingerprint
-of the key (the first eight hex digits of its SHA-256), never the key.
-The envelope is bound to its place: the stored thread id (scope
-included), the checkpoint id and the plaintext `iteration` are the
-cipher's associated data, so a ciphertext copied from one thread or
-checkpoint to another, or an envelope whose `iteration` was edited,
-fails to decrypt with `CheckpointEncryptionError` (`fork` and
-`copy_thread` re-seal the state under the new thread). Rotate by moving
-the old key to `previous_keys=[…]`: a checkpoint is decrypted with the
-key its `kid` names, so history written under the old key keeps loading
-while new saves use the new one. A checkpointer without the key raises
-`CheckpointEncryptionError` on an encrypted checkpoint rather than a
-parse error.
+What is stored is a versioned envelope, `{"v": 1, "alg": "A256GCM", "kid": …, "nonce": …, "ct": …, "iteration": …}`. `kid` is a fingerprint of the key (the first eight hex digits of its SHA-256), never the key.
+
+The envelope is bound to its place: the stored thread id (scope included), the checkpoint id and the plaintext `iteration` are the cipher's associated data, so a ciphertext copied from one thread or checkpoint to another, or an envelope whose `iteration` was edited, fails to decrypt with `CheckpointEncryptionError` (`fork` and `copy_thread` re-seal the state under the new thread).
+
+Rotate by moving the old key to `previous_keys=[…]`: a checkpoint is decrypted with the key its `kid` names, so history written under the old key keeps loading while new saves use the new one. A checkpointer without the key raises `CheckpointEncryptionError` on an encrypted checkpoint rather than a parse error.
 
 With encryption configured, a stored checkpoint that is **not** an
 envelope is refused — plaintext where ciphertext was expected is either
@@ -420,34 +347,23 @@ prefix of the `thread_id` column on `PgCheckpointer` (whose `tenant`
 stays the Row-Level Security boundary). Either id may be omitted; the ids
 are letters, digits and `. _ : @ + -`.
 
-The stored id is a grammar no input can forge: each segment — the
-`app_id`, the `user_id` and the thread id — is percent-encoded before it
-is joined, so a `/` or `=` inside a thread id cannot form a scope
-marker. `load("user=victim/t")` under an app-only scope is the app's
-own thread `app=billing/user%3Dvictim%2Ft`, never the user's; an
-app-only scope lists and loads the app-level threads only (a user's
-threads need the user in the scope); and a checkpointer with no scope
-never resolves a scoped stored id as a thread. Unscoped threads keep
-their bare id, so existing data is unaffected (an unscoped id that
-could pass for a scope marker is the one exception: it is stored
-percent-encoded).
+The stored id is a grammar no input can forge: each segment — the `app_id`, the `user_id` and the thread id — is percent-encoded before it is joined, so a `/` or `=` inside a thread id cannot form a scope marker.
 
-Give the scope to the checkpointer (`scope=`) when an instance serves
-one tenant, or to the run — `agent.run(…, scope=…)`, also `arun`,
-`run_sync`, `resume` and `continue_turn` — when one agent serves many.
-The runtime resolves the run's scope once, when the run starts, and
-every checkpointer call the run makes — the ledger's included — goes
-through a view of the checkpointer pinned to it
-(`cp.with_scope(scope)`), so two runs whose events are consumed
-alternately, or a run consumed in another context, each keep their own.
-`scope=None` inherits the checkpointer's own scope; `CheckpointScope()`
-runs explicitly unscoped, whatever the checkpointer's scope. A paused
-run remembers its scope, so `resume()` without one continues the turn
-where it was saved. `with scope.active():` is a convenience for code of
-your own: inside the block it is the default scope of every direct
-checkpointer call, and of a run started inside it. From another scope,
-or from no scope, the same `thread_id` is a miss, not a leak; `fork`
-keeps the fork in the scope.
+- `load("user=victim/t")` under an app-only scope is the app's own thread `app=billing/user%3Dvictim%2Ft`, never the user's.
+- An app-only scope lists and loads the app-level threads only (a user's threads need the user in the scope).
+- A checkpointer with no scope never resolves a scoped stored id as a thread.
+
+Unscoped threads keep their bare id, so existing data is unaffected (an unscoped id that could pass for a scope marker is the one exception: it is stored percent-encoded).
+
+Give the scope to the checkpointer (`scope=`) when an instance serves one tenant, or to the run — `agent.run(…, scope=…)`, also `arun`, `run_sync`, `resume` and `continue_turn` — when one agent serves many.
+
+The runtime resolves the run's scope once, when the run starts, and every checkpointer call the run makes — the ledger's included — goes through a view of the checkpointer pinned to it (`cp.with_scope(scope)`), so two runs whose events are consumed alternately, or a run consumed in another context, each keep their own.
+
+- `scope=None` inherits the checkpointer's own scope; `CheckpointScope()` runs explicitly unscoped, whatever the checkpointer's scope.
+- A paused run remembers its scope, so `resume()` without one continues the turn where it was saved.
+- `with scope.active():` is a convenience for code of your own: inside the block it is the default scope of every direct checkpointer call, and of a run started inside it.
+
+From another scope, or from no scope, the same `thread_id` is a miss, not a leak; `fork` keeps the fork in the scope.
 
 `cp.list_threads()` lists one scope at a time: the checkpointer's own
 (or the run's) by default, `scope=` for another, and the unscoped
@@ -612,19 +528,11 @@ auto-expire once the case is closed.
 
 ### SQL: `PostgreSQLBackend` / `MySQLBackend`
 
-If your stack is already on PostgreSQL or MySQL, the SDK ships storage
-backends so agent state can live alongside your app data. The backend
-upserts one row per key. Through the `*_checkpointer()` factories above,
-that key is `<thread_id>:<checkpoint_id>`, so each save adds a row, and a
-`<thread_id>:latest` row and a `<thread_id>:_checkpoints` index row are
-updated in place. `list_threads` and `vacuum` work over those rows, and
-`search_data` matches against the JSON `data` column. These are
-**storage backends**, not native checkpointers, so go
-through the `postgresql_checkpointer` / `mysql_checkpointer` factories
-(which wrap the backend in a `StorageBackendAdapter`) — see the
-[Postgres block above](#postgres-postgresql_checkpointer) for the call.
-`mysql_checkpointer` mirrors the same shape on the official MySQL
-Connector/Python asyncio driver.
+If your stack is already on PostgreSQL or MySQL, the SDK ships storage backends so agent state can live alongside your app data. The backend upserts one row per key.
+
+Through the `*_checkpointer()` factories above, that key is `<thread_id>:<checkpoint_id>`, so each save adds a row, and a `<thread_id>:latest` row and a `<thread_id>:_checkpoints` index row are updated in place. `list_threads` and `vacuum` work over those rows, and `search_data` matches against the JSON `data` column.
+
+These are **storage backends**, not native checkpointers, so go through the `postgresql_checkpointer` / `mysql_checkpointer` factories (which wrap the backend in a `StorageBackendAdapter`) — see the [Postgres block above](#postgres-postgresql_checkpointer) for the call. `mysql_checkpointer` mirrors the same shape on the official MySQL Connector/Python asyncio driver.
 
 ## Two checkpointer shapes — how to wire them
 

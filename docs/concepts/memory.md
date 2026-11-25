@@ -24,9 +24,12 @@ the agent acts on.
 
 Working memory is the context window. It is not stored anywhere; the
 question is what to drop when a long run no longer fits. A
-`ConversationManager` decides: `SlidingWindowManager` keeps the last *n*
-messages, `SummarizingManager` folds older turns into a summary, and
-`ContextCompactor` archives tool output and replaces it with a reference.
+`ConversationManager` decides:
+
+- `SlidingWindowManager` keeps the last *n* messages.
+- `SummarizingManager` folds older turns into a summary.
+- `ContextCompactor` archives tool output and replaces it with a reference.
+
 `TieredCompaction` runs those as tiers, each at its own fraction of the
 window: clear tool results, slide the window, summarise, keep the turns
 relevant to the task; `pin()` keeps a message through all of them, and
@@ -124,13 +127,11 @@ agent.run_sync(
 agent.run_sync("Which currency do I want my quotes in?", thread_id="case-200")
 ```
 
-Two managers can keep memories in Oracle Database 26ai. `LLMMemoryManager` works over any `BaseStore`, with
-Oracle Database 26ai through `OracleStore`, and lets you scope memories per
-user or tenant; by default it extracts with a small heuristic (standing
-rules such as "always … never …", who the user is, project context, links),
-and you pass `extract_fn` to let a model decide what is worth keeping. `OracleAgentMemoryManager` wraps Oracle's own agent-memory
-client (`oracleagentmemory`): extraction, context-card summaries and
-retrieval scoped by user, agent and thread, all inside the database.
+Two managers can keep memories in Oracle Database 26ai:
+
+- `LLMMemoryManager` works over any `BaseStore`, with Oracle Database 26ai through `OracleStore`, and lets you scope memories per user or tenant; by default it extracts with a small heuristic (standing rules such as "always … never …", who the user is, project context, links), and you pass `extract_fn` to let a model decide what is worth keeping.
+- `OracleAgentMemoryManager` wraps Oracle's own agent-memory client (`oracleagentmemory`): extraction, context-card summaries and retrieval scoped by user, agent and thread, all inside the database.
+
 [Long-term memory manager](memory-manager.md) covers both.
 
 ## Knowledge is not memory
