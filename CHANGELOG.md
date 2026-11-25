@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-11-25
+
 ### Changed
 
 - **An OCI Generative AI id is unpriced until you register its rate.** An
