@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.8.0] - 2026-11-26
+
 ### Added
 
 - **`get_model("oci:<model>", transport="responses")`** builds an
