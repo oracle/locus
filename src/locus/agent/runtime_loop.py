@@ -41,6 +41,7 @@ from locus.agent.durability import DurabilityMode, attach_durability, retry_ledg
 from locus.agent.model_retry import call_with_retry
 from locus.agent.result import normalize_stop_reason
 from locus.agent.run_context import (
+    _ANSWER_TOKENS_HELD,
     PendingInterrupt,
     RunContext,
     claim_result_slot,
@@ -3329,24 +3330,31 @@ class AgentRuntimeMixin:
         stop_reason: str | None = None
         cost_usd: float | None = None
 
-        async for chunk in self._model.stream(**complete_kwargs):
-            await chunk_queue.put(chunk)
-            if progress is not None:
-                progress.forwarded = True
-            if chunk.content:
-                content_parts.append(chunk.content)
-            if getattr(chunk, "reasoning", None):
-                reasoning_parts.append(chunk.reasoning)
-            if chunk.tool_calls:
-                # The provider emits accumulated calls once, at the end.
-                tool_calls = list(chunk.tool_calls)
-            if getattr(chunk, "usage", None):
-                usage = chunk.usage or {}
-            if getattr(chunk, "stop_reason", None):
-                stop_reason = chunk.stop_reason
-            chunk_cost = getattr(chunk, "cost_usd", None)
-            if isinstance(chunk_cost, int | float) and not isinstance(chunk_cost, bool):
-                cost_usd = float(chunk_cost)
+        # Lets a model that shows its own chunks see that these are held.
+        held = _ANSWER_TOKENS_HELD.set(
+            self.config.final_answer_verifier is not None and self.config.hold_final_answer_tokens
+        )
+        try:
+            async for chunk in self._model.stream(**complete_kwargs):
+                await chunk_queue.put(chunk)
+                if progress is not None:
+                    progress.forwarded = True
+                if chunk.content:
+                    content_parts.append(chunk.content)
+                if getattr(chunk, "reasoning", None):
+                    reasoning_parts.append(chunk.reasoning)
+                if chunk.tool_calls:
+                    # The provider emits accumulated calls once, at the end.
+                    tool_calls = list(chunk.tool_calls)
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage or {}
+                if getattr(chunk, "stop_reason", None):
+                    stop_reason = chunk.stop_reason
+                chunk_cost = getattr(chunk, "cost_usd", None)
+                if isinstance(chunk_cost, int | float) and not isinstance(chunk_cost, bool):
+                    cost_usd = float(chunk_cost)
+        finally:
+            _ANSWER_TOKENS_HELD.reset(held)
 
         return ModelResponse(
             message=Message.assistant(
@@ -3398,9 +3406,13 @@ class AgentRuntimeMixin:
                 return False
             return not (run is not None and run.cancel.is_set())
 
-        return await call_with_retry(
-            attempt, self.config.model_retry, notify=notify, may_retry=may_retry
+        # A model whose host retries each call is not retried a second time here.
+        policy = (
+            None
+            if getattr(self._model, "handles_retries", False) is True
+            else self.config.model_retry
         )
+        return await call_with_retry(attempt, policy, notify=notify, may_retry=may_retry)
 
     async def _get_model_response(
         self,

@@ -8,6 +8,19 @@ policy.
 
 ## [Unreleased]
 
+### Added
+
+- **Two things a model can tell, or learn from, the loop**, for a model that
+  is a call into a host with its own rules, such as a Temporal Activity.
+  `handles_retries = True` on a model class says the host already retries
+  each call: the loop then makes one attempt per call and `model_retry` does
+  not apply, so a failure the host declared final is not started again (with
+  `ModelRetryConfig(retry_unclassified=True)` it was).
+  `locus.agent.answer_tokens_held()` is `True` inside `model.stream()` when
+  the agent runs with a `final_answer_verifier` and
+  `hold_final_answer_tokens`, so a model that also shows its chunks to someone
+  itself can keep a draft the loop would drop out of sight.
+
 ### Fixed
 
 - **Parallel tool calls on one stream index are no longer joined into one.** A

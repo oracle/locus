@@ -24,6 +24,7 @@ from locus.agent.config import (
     ReflexionConfig,
 )
 from locus.agent.result import AgentResult, ExecutionMetrics, StopReason, StreamingResult
+from locus.agent.run_context import answer_tokens_held
 from locus.agent.specs import AgentSpec, load_agent_specs
 from locus.agent.subagent import Subagent, SubagentResult, run_subagent
 from locus.agent.tasks import TaskRegistry, task_tool
@@ -51,6 +52,7 @@ __all__ = [
     "Subagent",
     "SubagentResult",
     "TaskRegistry",
+    "answer_tokens_held",
     "chain_verifiers",
     "load_agent_specs",
     "loop",
