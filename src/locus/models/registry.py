@@ -146,7 +146,10 @@ def _register_defaults() -> None:
 
     # OCI GenAI — pick the right transport per model family.
     #
-    # Three transport rules, evaluated top-down:
+    # Transport rules, evaluated top-down:
+    #   0. ``transport="responses"`` — ``OCIResponsesModel``, for models the
+    #      chat endpoint serves only without function tools (see
+    #      ``OCIToolsNeedResponsesError``) and for server-held threads.
     #   1. Dedicated AI Cluster (DAC) endpoint OCIDs — strings starting
     #      with ``ocid1.generativeaiendpoint.`` — go through ``OCIModel``
     #      (SDK transport). The DAC endpoint OCID is passed verbatim to
@@ -160,36 +163,53 @@ def _register_defaults() -> None:
     #      against ``/openai/v1/chat/completions`` — real SSE streaming,
     #      day-0 model support, no Project OCID required.
     #
+    # Every transport takes the profile and the region from the environment
+    # the same way when the caller names neither: ``LOCUS_OCI_PROFILE`` then
+    # ``OCI_PROFILE``, and ``LOCUS_OCI_REGION`` then ``OCI_REGION``. Explicit
+    # kwargs always win.
+    #
     # See docs/how-to/oci-models.md and docs/how-to/oci-dac.md.
     try:
-        from locus.models.providers.oci import OCIChatCompletionsModel, OCIModel
+        from locus.models.providers.oci import (
+            OCIChatCompletionsModel,
+            OCIModel,
+            OCIResponsesModel,
+        )
 
-        def _make_oci(m: str, **kw: Any) -> ModelProtocol:
-            lowered = m.lower()
-            # Rule 1: DAC endpoint OCID → SDK transport.
-            if lowered.startswith("ocid1.generativeaiendpoint."):
-                return cast("ModelProtocol", OCIModel(model_id=m, **kw))
-            # Rule 2: Cohere chat models (command-r*, command-a*) → SDK transport.
-            # OCI serves Cohere only through its native chat API; /openai/v1
-            # answers 400 "Unsupported OpenAI operation" for every cohere.* id.
-            if lowered.startswith("cohere."):
-                # SDK transport: defaults to profile_name="DEFAULT" + API_KEY,
-                # so no env-var fallback needed for one-line ergonomics.
-                return cast("ModelProtocol", OCIModel(model_id=m, **kw))
-            # Rule 3: V1 transport. Strictly requires profile= or auth_type=.
-            # Fall back to OCI_PROFILE env var so `Agent(model="oci:...")`
-            # works in one line. Explicit kwargs always win.
-            if "profile" not in kw and "auth_type" not in kw:
-                env_profile = os.environ.get("OCI_PROFILE")
+        def _oci_env_defaults(kw: dict[str, Any], *, endpoint_key: str) -> None:
+            if not {"profile", "profile_name", "auth_type"} & kw.keys():
+                env_profile = os.environ.get("LOCUS_OCI_PROFILE") or os.environ.get("OCI_PROFILE")
                 if env_profile:
                     kw["profile"] = env_profile
-            # The region the same way, as the provider guide documents:
-            # LOCUS_OCI_REGION, then OCI_REGION, else the class default.
-            # An explicit region= or base_url= is left alone.
-            if "region" not in kw and "base_url" not in kw:
+            if "region" not in kw and endpoint_key not in kw:
                 env_region = os.environ.get("LOCUS_OCI_REGION") or os.environ.get("OCI_REGION")
                 if env_region:
                     kw["region"] = env_region
+
+        def _make_oci(m: str, **kw: Any) -> ModelProtocol:
+            lowered = m.lower()
+            transport = kw.pop("transport", None)
+            if transport not in (None, "responses"):
+                msg = f'oci: transport must be "responses" or left out, got {transport!r}'
+                raise ValueError(msg)
+            # Rule 0: the caller asked for the Responses API.
+            if transport == "responses":
+                _oci_env_defaults(kw, endpoint_key="base_url")
+                return cast("ModelProtocol", OCIResponsesModel(model=m, **kw))
+            # Rule 1: DAC endpoint OCID → SDK transport.
+            # Rule 2: Cohere chat models (command-r*, command-a*) → SDK transport.
+            # OCI serves Cohere only through its native chat API; /openai/v1
+            # answers 400 "Unsupported OpenAI operation" for every cohere.* id.
+            if lowered.startswith(("ocid1.generativeaiendpoint.", "cohere.")):
+                # With neither set here nor in the environment, the SDK
+                # transport keeps its own defaults: the DEFAULT profile and
+                # that profile's region.
+                _oci_env_defaults(kw, endpoint_key="service_endpoint")
+                return cast("ModelProtocol", OCIModel(model_id=m, **kw))
+            # Rule 3: V1 transport. Strictly requires profile= or auth_type=;
+            # the environment fallback makes `Agent(model="oci:...")` work in
+            # one line. Without a region it uses the class default.
+            _oci_env_defaults(kw, endpoint_key="base_url")
             return cast("ModelProtocol", OCIChatCompletionsModel(model=m, **kw))
 
         register_provider("oci", _make_oci)

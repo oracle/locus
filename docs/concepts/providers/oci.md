@@ -172,7 +172,8 @@ send it again with `"none"`, keep sending `"none"` with tools for that
 instance, and log a warning once (see the gotchas below).
 
 For the **Responses transport**, instantiate `OCIResponsesModel`
-explicitly — it's opt-in, not selected by prefix. See the
+explicitly or pass `transport="responses"` to `get_model` — it's opt-in,
+not selected by prefix. See the
 [Responses concept page](../oci-responses.md) and
 [notebook 34](../../notebooks/notebook_34_oci_responses.md).
 
@@ -298,7 +299,7 @@ built from a config carries them.
 | `compartment_id is required when auth_type= is set` | Principal auth on the V1/Responses transports cannot derive a compartment from a profile. Pass `compartment_id=` on the model (the SDK transport falls back to the profile's tenancy). |
 | Streaming yields one big chunk | DAC endpoint rejected `is_stream`. The fall-back path in `OCIModel.stream()` swallows the failure and emits the full response as one chunk. |
 | Cohere model fails on V1 | The `oci:` prefix already routes `cohere.*` ids to the SDK transport; if you built `OCIChatCompletionsModel` yourself, use `OCIModel` (in the notebooks, `LOCUS_OCI_TRANSPORT=sdk`). |
-| Log line `OCI chat: the endpoint refused function tools for …` (on 6.5.1 and earlier, `400 Function tools with reasoning_effort are not supported for gpt-6… in /v1/chat/completions`) | The gpt-5.6 and gpt-6 families accept function tools on the chat endpoint only with the reasoning effort set to `none`. Both transports handle the refusal: the request is sent again with `reasoning_effort="none"`, the instance keeps sending `none` with tools, and the warning is logged once (logger `locus.models.providers.oci`). Pass `reasoning_effort="none"` to `OCIChatCompletionsModel` or `OCIModel` at construction to skip the first attempt (both transports take the same kwarg; the `oci:` prefix cannot), or use `OCIResponsesModel` to keep reasoning together with tools. A model that does not accept `none` (`openai.gpt-6.2-sol` answers `Unsupported value`) needs `OCIResponsesModel` for tools; that second error is raised as is. gpt-5.5 and earlier are not affected. |
+| Log line `OCI chat: the endpoint refused function tools for …` (on 6.5.1 and earlier, `400 Function tools with reasoning_effort are not supported for gpt-6… in /v1/chat/completions`) | The gpt-5.6 and gpt-6 families accept function tools on the chat endpoint only with the reasoning effort set to `none`. Both transports handle the refusal: the request is sent again with `reasoning_effort="none"`, the instance keeps sending `none` with tools, and the warning is logged once (logger `locus.models.providers.oci`). Pass `reasoning_effort="none"` to `OCIChatCompletionsModel` or `OCIModel` at construction to skip the first attempt (both transports take the same kwarg; the `oci:` prefix cannot), or use `OCIResponsesModel` to keep reasoning together with tools. A model that does not accept `none` (`openai.gpt-6.2-sol` answers `Unsupported value`) needs `OCIResponsesModel` for tools: both transports raise `OCIToolsNeedResponsesError`, and `get_model("oci:<model>", transport="responses")` builds that model. gpt-5.5 and earlier are not affected. |
 
 To list the models available in a region:
 

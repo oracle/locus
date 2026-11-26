@@ -452,6 +452,28 @@ class TestToolsRefusedUnderReasoning:
         assert not [r for r in caplog.records if "reasoning_effort" in r.getMessage()]
 
     @pytest.mark.asyncio
+    async def test_a_model_that_refuses_none_too_says_to_use_responses(self) -> None:
+        from locus.models.providers.oci import OCIToolsNeedResponsesError
+
+        no_none = (
+            "Unsupported value: 'reasoning_effort' does not support 'none' with this model. "
+            "Supported values are: 'low', 'medium', 'high', and 'xhigh'."
+        )
+        m = OCIModel(model_id="openai.gpt-6.2-sol", reasoning_effort="low")
+        client, provider = _patch_client_and_provider(m, _make_oci_response())
+        provider.convert_tools.return_value = [SimpleNamespace(name="stock")]
+        client.chat = MagicMock(side_effect=[self._refusal(self._MESSAGE), self._refusal(no_none)])
+        with pytest.raises(OCIToolsNeedResponsesError) as raised:
+            await m.complete([Message.user("hi")], tools=self._TOOLS)
+        assert client.chat.call_count == 2
+        assert "OCIResponsesModel" in str(raised.value)
+        # The instance now sends "none" at once; the answer is the same error.
+        client.chat = MagicMock(side_effect=self._refusal(no_none))
+        with pytest.raises(OCIToolsNeedResponsesError):
+            await m.complete([Message.user("again")], tools=self._TOOLS)
+        assert client.chat.call_count == 1
+
+    @pytest.mark.asyncio
     async def test_other_400_is_raised(self) -> None:
         from oci.exceptions import ServiceError
 

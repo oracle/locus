@@ -64,7 +64,9 @@ from locus.core.loop_bound import loop_bound
 from locus.models.native.openai import OpenAIConfig, OpenAIModel
 from locus.models.providers.oci._reasoning import (
     NO_REASONING,
+    OCIToolsNeedResponsesError,
     is_no_reasoning,
+    refuses_no_reasoning,
     refuses_tools_under_reasoning,
     warn_reasoning_disabled,
 )
@@ -897,6 +899,24 @@ class OCIChatCompletionsModel(OpenAIModel):
         warn_reasoning_disabled(self.config.model, "OCIChatCompletionsModel")
         return True
 
+    def _tools_need_responses(
+        self, exc: BaseException, tools: list[dict[str, Any]] | None
+    ) -> OCIToolsNeedResponsesError | None:
+        """The error to raise when ``exc`` refuses the ``none`` this instance sent with tools.
+
+        ``None`` for any other failure. The endpoint has then refused tools
+        both under reasoning and without it, which leaves the Responses API.
+        """
+        if not tools or not self._reasoning_off_for_tools:
+            return None
+        if getattr(exc, "status_code", None) != 400:
+            return None
+        body = getattr(exc, "body", None)
+        detail = body.get("message") if isinstance(body, dict) else None
+        if not refuses_no_reasoning(detail or str(exc)):
+            return None
+        return OCIToolsNeedResponsesError(self.config.model)
+
     async def complete(
         self,
         messages: list[Message],
@@ -912,8 +932,15 @@ class OCIChatCompletionsModel(OpenAIModel):
             return await super().complete(messages, tools=tools, **kwargs)
         except Exception as exc:
             if not self._retry_without_reasoning(exc, tools, kwargs):
+                if (needs := self._tools_need_responses(exc, tools)) is not None:
+                    raise needs from exc
                 raise
+        try:
             return await super().complete(messages, tools=tools, **self._without_reasoning(kwargs))
+        except Exception as exc:
+            if (needs := self._tools_need_responses(exc, tools)) is not None:
+                raise needs from exc
+            raise
 
     async def stream(
         self,
@@ -946,11 +973,18 @@ class OCIChatCompletionsModel(OpenAIModel):
             return
         except Exception as exc:
             if not self._retry_without_reasoning(exc, tools, kwargs):
+                if (needs := self._tools_need_responses(exc, tools)) is not None:
+                    raise needs from exc
                 raise
-            async for event in self._stream_oci_turn(
-                messages, tools, self._without_reasoning(kwargs)
-            ):
-                yield event
+            try:
+                async for event in self._stream_oci_turn(
+                    messages, tools, self._without_reasoning(kwargs)
+                ):
+                    yield event
+            except Exception as retry_exc:
+                if (needs := self._tools_need_responses(retry_exc, tools)) is not None:
+                    raise needs from retry_exc
+                raise
             return
         yield first
         async for event in events:

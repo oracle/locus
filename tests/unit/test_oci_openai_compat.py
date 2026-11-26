@@ -586,6 +586,48 @@ class TestToolsRefusedUnderReasoning:
             await model.complete([Message.user("Hi")], tools=self._TOOLS)
         assert create.call_count == 1
 
+    # --- a model that refuses 'none' as well -------------------------------
+
+    _NO_NONE = (
+        "Unsupported value: 'reasoning_effort' does not support 'none' with this model. "
+        "Supported values are: 'low', 'medium', 'high', and 'xhigh'."
+    )
+
+    @pytest.mark.asyncio
+    async def test_a_model_that_refuses_none_too_says_to_use_responses(self):
+        from locus.models.failover import FailoverReason, classify
+        from locus.models.providers.oci import OCIToolsNeedResponsesError
+
+        model = self._model()
+        create = self._wire(
+            model,
+            self._refusal(self._MESSAGE),
+            self._refusal(self._NO_NONE),
+            self._refusal(self._NO_NONE),
+        )
+        with pytest.raises(OCIToolsNeedResponsesError) as raised:
+            await model.complete([Message.user("Hi")], tools=self._TOOLS)
+        assert create.call_count == 2
+        assert 'transport="responses"' in str(raised.value)
+        assert raised.value.model == "openai.gpt-6-luna"
+        # The same request fails the same way: not something to retry.
+        assert classify(raised.value).reason is FailoverReason.FORMAT_ERROR
+        # The instance now sends "none" at once; the answer is the same error.
+        with pytest.raises(OCIToolsNeedResponsesError):
+            await model.complete([Message.user("Again")], tools=self._TOOLS)
+        assert create.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_refusing_none_without_the_tools_refusal_is_raised_as_it_is(self):
+        import openai
+
+        # The caller chose "none"; nothing says tools are the reason.
+        model = self._model(reasoning_effort="none")
+        create = self._wire(model, self._refusal(self._NO_NONE))
+        with pytest.raises(openai.BadRequestError):
+            await model.complete([Message.user("Hi")], tools=self._TOOLS)
+        assert create.call_count == 1
+
     # --- the streaming call takes the same decision -------------------------
 
     @staticmethod

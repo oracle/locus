@@ -29,7 +29,9 @@ from locus.core.messages import Message
 from locus.models.base import ModelConfig, ModelResponse
 from locus.models.providers.oci._reasoning import (
     NO_REASONING,
+    OCIToolsNeedResponsesError,
     is_no_reasoning,
+    refuses_no_reasoning,
     refuses_tools_under_reasoning,
     warn_reasoning_disabled,
 )
@@ -212,6 +214,20 @@ class OCIModel(BaseModel):
         )
         super().__init__(config=config)
 
+    def _tools_need_responses(self, exc: BaseException, tools: Any, effort: str | None) -> bool:
+        """Whether ``exc`` refuses the ``none`` this instance sent with tools.
+
+        The endpoint has then refused tools both under reasoning and without
+        it, which leaves the Responses API.
+        """
+        return (
+            bool(tools)
+            and bool(getattr(self, "_tools_without_reasoning", False))
+            and is_no_reasoning(effort)
+            and getattr(exc, "status", None) == 400
+            and refuses_no_reasoning(getattr(exc, "message", None) or str(exc))
+        )
+
     @property
     def client(self) -> OCIClient:
         """Get or create the OCI client."""
@@ -334,15 +350,22 @@ class OCIModel(BaseModel):
                     and refuses_tools_under_reasoning(getattr(exc, "message", None) or str(exc))
                 )
                 if not refused:
+                    if self._tools_need_responses(exc, converted_tools, reasoning_effort):
+                        raise OCIToolsNeedResponsesError(self.config.model_id) from exc
                     raise
                 object.__setattr__(self, "_tools_without_reasoning", True)
                 warn_reasoning_disabled(self.config.model_id, "OCIModel")
                 reasoning_effort = NO_REASONING
                 chat_details = _chat_details(reasoning_effort)
-                response = await loop.run_in_executor(
-                    None,
-                    partial(self.client.chat, chat_details),
-                )
+                try:
+                    response = await loop.run_in_executor(
+                        None,
+                        partial(self.client.chat, chat_details),
+                    )
+                except Exception as retry_exc:
+                    if self._tools_need_responses(retry_exc, converted_tools, reasoning_effort):
+                        raise OCIToolsNeedResponsesError(self.config.model_id) from retry_exc
+                    raise
 
             # Parse response
             content, tool_calls, stop_reason = self.provider.parse_response(response)
@@ -498,5 +521,6 @@ __all__ = [
     "OCIResponsesModel",
     "OCIResponsesStateLostError",
     "OCIResponsesZeroDataRetentionError",
+    "OCIToolsNeedResponsesError",
     "build_oci_openai_base_url",
 ]
