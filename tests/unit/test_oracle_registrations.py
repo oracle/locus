@@ -64,6 +64,75 @@ def test_oci_routes_cohere_r_series_and_dac_endpoints_to_the_sdk_transport() -> 
     assert isinstance(get_model("oci:ocid1.generativeaiendpoint.oc1.phx.abc"), OCIModel)
 
 
+def test_oci_sdk_transport_takes_profile_and_region_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from locus.models.providers.oci import OCIModel
+
+    for name in ("LOCUS_OCI_PROFILE", "OCI_PROFILE", "LOCUS_OCI_REGION", "OCI_REGION"):
+        monkeypatch.delenv(name, raising=False)
+    # With nothing set, the SDK transport keeps its own defaults.
+    default = get_model("oci:cohere.command-a-03-2025")
+    assert isinstance(default, OCIModel)
+    assert default.config.profile_name == "DEFAULT"
+    assert default.config.service_endpoint is None
+
+    monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
+    monkeypatch.setenv("OCI_REGION", "us-chicago-1")
+    model = get_model("oci:cohere.command-a-03-2025")
+    assert isinstance(model, OCIModel)
+    assert model.config.profile_name == "FROM_ENV"
+    assert model.config.service_endpoint == (
+        "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com"
+    )
+    # A DAC endpoint takes them the same way.
+    dac = get_model("oci:ocid1.generativeaiendpoint.oc1.phx.abc")
+    assert isinstance(dac, OCIModel)
+    assert dac.config.profile_name == "FROM_ENV"
+
+    # LOCUS_-prefixed names win, as on the V1 transport.
+    monkeypatch.setenv("LOCUS_OCI_PROFILE", "LOCUS_ENV")
+    monkeypatch.setenv("LOCUS_OCI_REGION", "eu-frankfurt-1")
+    preferred = get_model("oci:cohere.command-a-03-2025")
+    assert isinstance(preferred, OCIModel)
+    assert preferred.config.profile_name == "LOCUS_ENV"
+    assert "eu-frankfurt-1" in str(preferred.config.service_endpoint)
+
+    # Explicit kwargs always beat the environment, under either spelling.
+    for explicit_kw in ({"profile": "EXPLICIT"}, {"profile_name": "EXPLICIT"}):
+        explicit = get_model(
+            "oci:cohere.command-a-03-2025",
+            service_endpoint="https://example.invalid",
+            **explicit_kw,
+        )
+        assert isinstance(explicit, OCIModel)
+        assert explicit.config.profile_name == "EXPLICIT"
+        assert explicit.config.service_endpoint == "https://example.invalid"
+    # An auth_type means no profile is wanted.
+    principal = get_model("oci:cohere.command-a-03-2025", auth_type="instance_principal")
+    assert isinstance(principal, OCIModel)
+    assert principal.config.profile_name == "DEFAULT"
+
+
+def test_oci_transport_responses_is_chosen_by_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    from locus.models.providers.oci import OCIChatCompletionsModel, OCIResponsesModel
+
+    monkeypatch.delenv("LOCUS_OCI_PROFILE", raising=False)
+    monkeypatch.delenv("LOCUS_OCI_REGION", raising=False)
+    monkeypatch.setenv("OCI_PROFILE", "FROM_ENV")
+    monkeypatch.setenv("OCI_REGION", "us-ashburn-1")
+    model = get_model("oci:openai.gpt-6.2-sol", transport="responses")
+    assert isinstance(model, OCIResponsesModel)
+    assert model.config.model == "openai.gpt-6.2-sol"
+    assert model.config.profile == "FROM_ENV"
+    assert model.config.region == "us-ashburn-1"
+
+    # Left out, the routing is what it was.
+    assert isinstance(get_model("oci:openai.gpt-6.2-sol"), OCIChatCompletionsModel)
+    with pytest.raises(ValueError, match="transport"):
+        get_model("oci:openai.gpt-6.2-sol", transport="grpc")
+
+
 def test_oci_routes_everything_else_to_the_v1_transport(monkeypatch: pytest.MonkeyPatch) -> None:
     from locus.models.providers.oci import OCIChatCompletionsModel
 

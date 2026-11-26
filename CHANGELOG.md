@@ -10,6 +10,10 @@ policy.
 
 ### Added
 
+- **`get_model("oci:<model>", transport="responses")`** builds an
+  `OCIResponsesModel`, with the same environment defaults as the other
+  transports. The Responses transport stays opt-in.
+
 - **A seam for the loop's clock, ids and randomness.** The agent loop and the
   multi-agent shapes read `time`, `datetime.now`, `uuid4` and `random`
   directly, so a host that replays them, such as a Temporal workflow, could
@@ -23,6 +27,23 @@ policy.
   modules reads the clock, an id or a random number directly.
 
 ### Fixed
+
+- **`get_model("oci:cohere.…")` reads the profile and region from the
+  environment.** The V1 transport took its profile from `OCI_PROFILE` and its
+  region from `OCI_REGION`; Cohere models and Dedicated AI Cluster endpoints,
+  which go through `OCIModel`, ignored both. With no `DEFAULT` profile the
+  model failed on its first call with the OCI SDK's "config missing" error,
+  and with a profile whose home region does not serve the model on demand it
+  failed with `404 Entity with key cohere.… not found`. Every transport now
+  takes `LOCUS_OCI_PROFILE` / `OCI_PROFILE` and `LOCUS_OCI_REGION` /
+  `OCI_REGION` when the caller names neither. Explicit arguments win, and
+  with nothing set `OCIModel` keeps the `DEFAULT` profile and its region.
+- **A model that takes function tools only on the Responses API says so.**
+  The chat endpoint refuses tools under reasoning, and Locus sends the request
+  again with `reasoning_effort="none"`. `openai.gpt-6.2-sol` refuses `none`
+  too, so the run ended with the endpoint's second 400, "'reasoning_effort'
+  does not support 'none' with this model". Both chat transports now raise
+  `OCIToolsNeedResponsesError`, which says to use `OCIResponsesModel`.
 
 - **A run abandoned during a tool call is finalized without errors.** A host
   whose event loop has no async-generator hooks, such as a Temporal workflow

@@ -185,6 +185,31 @@ any id starting with `cohere.` or `ocid1.generativeaiendpoint.` (a
 Dedicated AI Cluster endpoint) and `OCIChatCompletionsModel` otherwise.
 You pass kwargs in the shape the picked class expects.
 
+When you name neither, every transport takes the profile from
+`LOCUS_OCI_PROFILE`, then `OCI_PROFILE`, and the region from
+`LOCUS_OCI_REGION`, then `OCI_REGION`. Without those, `OCIModel` uses the
+`DEFAULT` profile and that profile's region, and the other two use
+`us-chicago-1`. Set the region for Cohere when your profile's home region
+does not serve the model on demand: the service answers `404 Entity with key
+cohere.… not found`.
+
+```bash
+export OCI_PROFILE=MY_PROFILE
+export OCI_REGION=us-chicago-1
+```
+
+`transport="responses"` picks `OCIResponsesModel`:
+
+```python
+m3 = get_model("oci:openai.gpt-6.2-sol", transport="responses")
+```
+
+Some models take function tools only there. The chat endpoint refuses tools
+while reasoning is on, Locus sends the request again with
+`reasoning_effort="none"`, and a model that refuses `none` as well (first seen
+on `openai.gpt-6.2-sol`) leaves no way to call tools on that endpoint. The
+model then raises `OCIToolsNeedResponsesError`, which names this option.
+
 ## Notebooks and `examples/config.py`
 
 The shared notebook harness (`examples/config.py`) reads
