@@ -3283,8 +3283,11 @@ version = "6.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "oci" },
+    { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "requests" },
     { name = "typing-extensions" },
 ]
 
@@ -3574,6 +3577,7 @@ requires-dist = [
     { name = "mysql-connector-python", marker = "extra == 'rag'", specifier = ">=9.0" },
     { name = "mysql-connector-python", marker = "extra == 'sdk'", specifier = ">=9.0" },
     { name = "numpy", marker = "extra == 'pgvector'", specifier = ">=1.26" },
+    { name = "oci", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'checkpoints'", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'llm'", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'oci'", specifier = ">=2.173.0" },
@@ -3581,6 +3585,7 @@ requires-dist = [
     { name = "oci", marker = "extra == 'oci-sandbox'", specifier = ">=2.189.0" },
     { name = "oci", marker = "extra == 'rag'", specifier = ">=2.173.0" },
     { name = "oci", marker = "extra == 'sdk'", specifier = ">=2.173.0" },
+    { name = "openai", specifier = ">=1.50,<3" },
     { name = "openai", marker = "extra == 'llm'", specifier = ">=1.50,<3" },
     { name = "openai", marker = "extra == 'oci'", specifier = ">=1.50,<3" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.50,<3" },
@@ -3633,6 +3638,7 @@ requires-dist = [
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },
     { name = "redis", marker = "extra == 'redis-vector'", specifier = ">=5.0" },
     { name = "redis", marker = "extra == 'sdk'", specifier = ">=5.0" },
+    { name = "requests", specifier = ">=2.31" },
     { name = "requests", marker = "extra == 'checkpoints'", specifier = ">=2.31" },
     { name = "requests", marker = "extra == 'llm'", specifier = ">=2.31" },
     { name = "requests", marker = "extra == 'oci'", specifier = ">=2.31" },

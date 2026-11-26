@@ -26,6 +26,7 @@ from locus.core.media import (
     strip_images,
 )
 from locus.core.messages import Message, Role, ToolCall
+from locus.models._extras import missing_extra
 from locus.models.base import ModelConfig, ModelResponse
 
 
@@ -162,7 +163,10 @@ def _sdk_declares_temperature() -> bool:
     answers ``temperature: Extra inputs are not permitted`` if it is smuggled
     in through ``extra_body``. Against that SDK it is never sent.
     """
-    from anthropic.resources.messages import AsyncMessages  # noqa: PLC0415
+    try:
+        from anthropic.resources.messages import AsyncMessages  # noqa: PLC0415
+    except ModuleNotFoundError as exc:
+        raise missing_extra("AnthropicModel", "anthropic", exc.name) from exc
 
     return "temperature" in inspect.signature(AsyncMessages.create).parameters
 
@@ -360,7 +364,10 @@ class AnthropicModel(BaseModel):
         """
 
         def build() -> anthropic.AsyncAnthropic:
-            import anthropic  # noqa: PLC0415
+            try:
+                import anthropic  # noqa: PLC0415
+            except ModuleNotFoundError as exc:
+                raise missing_extra("AnthropicModel", "anthropic", exc.name) from exc
 
             token = self._auth_token()
             common: dict[str, Any] = {

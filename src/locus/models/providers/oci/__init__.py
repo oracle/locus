@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from locus.core.events import ModelChunkEvent
 from locus.core.messages import Message
 from locus.models.base import ModelConfig, ModelResponse
+from locus.models.providers.oci import _requirements  # noqa: F401
 from locus.models.providers.oci._reasoning import (
     NO_REASONING,
     OCIToolsNeedResponsesError,

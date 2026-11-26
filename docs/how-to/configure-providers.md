@@ -15,10 +15,10 @@ override, or an explicit `base_url=`. The order is always the same:
 3. The vendor's own variable, where one exists (`OLLAMA_BASE_URL`, `RUNPOD_ENDPOINT_ID`, …).
 4. The provider's default endpoint.
 
-Install the extra for the client you use: `pip install "locus-sdk[oci]"` for
-OCI Generative AI, `"locus-sdk[openai]"` for OpenAI and every
-OpenAI-compatible route, `"locus-sdk[anthropic]"` for Anthropic. The full
-list of extras is on [Install extras](install-extras.md).
+`pip install locus-sdk` includes the clients for OCI Generative AI, OpenAI
+and every OpenAI-compatible route. Anthropic is an extra:
+`pip install "locus-sdk[anthropic]"`. The full list of extras is on
+[Install extras](install-extras.md).
 
 ## OCI Generative AI
 

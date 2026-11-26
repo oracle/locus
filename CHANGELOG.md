@@ -8,6 +8,28 @@ policy.
 
 ## [Unreleased]
 
+### Changed
+
+- **`pip install locus-sdk` includes the OCI Generative AI and OpenAI
+  providers.** `oci`, `openai` and `requests` are core dependencies now.
+  Before, a plain install answered `get_model("oci:...")` with "Unknown
+  provider: oci" and the first call of an `openai:` model with "No module
+  named 'openai'", although OCI is the provider the documentation leads with.
+  The install grows from about 18 MB to about 320 MB, nearly all of it the
+  OCI SDK. The `oci` and `openai` extras remain, so requirements that name
+  `locus-sdk[oci]` install as before.
+
+### Fixed
+
+- **A provider whose package is missing says what to install.** With
+  `--no-deps` or a trimmed image the OCI provider's packages can still be
+  absent. `oci` then stays in `list_providers()`, and `get_model("oci:...")`
+  and `import locus.models.providers.oci` raise `ModuleNotFoundError: The OCI
+  provider needs the requests package: pip install "locus-sdk[oci]"` instead
+  of "Unknown provider: oci" and "No module named 'requests'". `OpenAIModel`,
+  `OCIChatCompletionsModel` and `AnthropicModel` name their extra the same
+  way when their client package is missing.
+
 ## [6.8.0] - 2026-11-26
 
 ### Added

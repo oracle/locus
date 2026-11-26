@@ -71,23 +71,28 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "typing-extensions>=4.0",
+    # OCI Generative AI and OpenAI work from a plain ``pip install locus-sdk``:
+    # OCI is the provider the docs lead with, and "Unknown provider: oci" is
+    # the wrong answer to a first run.
+    # openai 3.x moved to the httpx2 client; the OCI V1 transport signs requests
+    # through an httpx.Auth hook, so the SDK stays on the httpx-based 2.x line
+    # until that transport is ported. The lock resolves to 2.41. OCI Generative
+    # AI speaks the OpenAI Chat Completions wire protocol, so the OCI provider
+    # needs the ``openai`` client too.
+    # ``requests``: the request signer (locus.models.providers.oci._signing) builds on
+    # requests.auth.AuthBase; the OCI SDK vendors its own copy, so it must be listed.
+    "oci>=2.173.0",
+    "openai>=1.50,<3",
+    "requests>=2.31",
 ]
 
 [project.optional-dependencies]
 # Model providers — every provider class under src/locus/models/native/
 # has a matching extra here. Keep this list in sync when adding a provider.
-# openai 3.x moved to the httpx2 client; the OCI V1 transport signs requests
-# through an httpx.Auth hook, so the SDK stays on the httpx-based 2.x line
-# until that transport is ported. The lock resolves to 2.41.
+# ``openai`` and ``oci`` are core dependencies now; the two extras stay so
+# that ``pip install "locus-sdk[oci]"`` in existing requirements keeps working.
 openai = ["openai>=1.50,<3"]
 anthropic = ["anthropic>=0.40"]
-# OCI Generative AI speaks the OpenAI Chat Completions wire protocol;
-# locus.models.providers.oci.openai_compat lazy-imports the `openai`
-# client at request time (`client` property). Without it in the extra,
-# `pip install "locus-sdk[oci]"` boots fine but every .complete() call
-# raises ModuleNotFoundError. Pin alongside the [openai] extra.
-# ``requests``: the request signer (locus.models.providers.oci._signing) builds on
-# requests.auth.AuthBase; the OCI SDK vendors its own copy, so it must be listed.
 oci = ["oci>=2.173.0", "openai>=1.50,<3", "requests>=2.31"]
 
 # All LLM / model providers — short alias for pip discoverability.

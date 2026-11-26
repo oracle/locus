@@ -61,6 +61,7 @@ import httpx
 from pydantic import Field
 
 from locus.core.loop_bound import loop_bound
+from locus.models._extras import missing_extra
 from locus.models.native.openai import OpenAIConfig, OpenAIModel
 from locus.models.providers.oci._reasoning import (
     NO_REASONING,
@@ -1040,7 +1041,10 @@ class OCIChatCompletionsModel(OpenAIModel):
         """Build the AsyncOpenAI client wired with the OCI request signer."""
 
         def build() -> openai.AsyncOpenAI:
-            import openai
+            try:
+                import openai
+            except ModuleNotFoundError as exc:
+                raise missing_extra("OCIChatCompletionsModel", "oci", exc.name) from exc
 
             # Pin the same timeout/retry knobs the parent OpenAIModel
             # uses so a stuck OCI request can't hang asyncio.gather()

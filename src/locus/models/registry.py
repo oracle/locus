@@ -213,8 +213,15 @@ def _register_defaults() -> None:
             return cast("ModelProtocol", OCIChatCompletionsModel(model=m, **kw))
 
         register_provider("oci", _make_oci)
-    except ImportError:
-        pass
+    except ImportError as exc:
+        # Keep the prefix registered: "Unknown provider: oci" would say Locus
+        # has no OCI support, when what is missing is the extra.
+        unavailable = exc
+
+        def _oci_unavailable(m: str, **kw: Any) -> ModelProtocol:
+            raise ModuleNotFoundError(str(unavailable), name=unavailable.name) from unavailable
+
+        register_provider("oci", _oci_unavailable)
 
 
 # Register on import
