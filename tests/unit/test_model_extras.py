@@ -62,6 +62,36 @@ def test_oci_stays_registered_and_says_what_to_install(monkeypatch: pytest.Monke
     assert isinstance(get_model("oci:openai.gpt-5.5", profile="DEFAULT"), OCIChatCompletionsModel)
 
 
+def test_without_the_oci_sdk_the_package_imports_and_the_first_use_says_what_to_install(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import locus.models.providers.oci as oci_provider
+    from locus.models.providers.oci import OCIModel
+    from locus.models.providers.oci._requirements import require_oci_sdk
+
+    real_find_spec = importlib.util.find_spec
+
+    def without_the_sdk(name: str, *args: object, **kwargs: object) -> object:
+        return None if name == "oci" else real_find_spec(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(importlib.util, "find_spec", without_the_sdk)
+    expected = 'The OCI provider needs the oci package: pip install "locus-sdk[oci]"'
+    # Importing and building need no SDK: documentation builds do both.
+    assert oci_provider.OCIChatCompletionsModel is not None
+    sdk_model = OCIModel(model_id="cohere.command-a-03-2025")
+    with pytest.raises(ModuleNotFoundError) as raised:
+        require_oci_sdk()
+    assert str(raised.value) == expected
+    # Both transports need the SDK when they first sign a request.
+    v1_model = get_model("oci:openai.gpt-5.5", profile="DEFAULT", compartment_id="ocid1.test")
+    with pytest.raises(ModuleNotFoundError) as raised:
+        _ = v1_model.client  # type: ignore[attr-defined]
+    assert str(raised.value) == expected
+    with pytest.raises(ModuleNotFoundError) as raised:
+        _ = sdk_model.client.oci_config
+    assert str(raised.value) == expected
+
+
 def test_openai_model_without_the_client_says_what_to_install(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -71,6 +71,7 @@ from locus.models.providers.oci._reasoning import (
     refuses_tools_under_reasoning,
     warn_reasoning_disabled,
 )
+from locus.models.providers.oci._requirements import require_oci_sdk
 
 
 if TYPE_CHECKING:
@@ -223,6 +224,7 @@ class OCIChatCompletionsConfig(OpenAIConfig):
 
 def _load_profile_config(profile: str, config_file: str) -> dict[str, Any]:
     """Load an OCI config profile as a dict (tenancy, user, key_file, ...)."""
+    require_oci_sdk()
     from oci import config as oci_config_module
 
     cfg_path = str(Path(config_file).expanduser())
@@ -466,6 +468,7 @@ def build_oci_signer(
     ``None``, ``profile`` names the section of ``config_file`` to sign with
     (API key, or the session token the section names).
     """
+    require_oci_sdk()
     if auth_type == "instance_principal":
         return _build_instance_principal_signer()
     if auth_type == "resource_principal":

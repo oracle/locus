@@ -17,7 +17,9 @@ policy.
   locus.models.providers.oci` "No module named 'requests'", and the first
   call of an `openai:` model "No module named 'openai'". `oci` now stays in
   `list_providers()`, and both OCI paths raise `ModuleNotFoundError: The OCI
-  provider needs the oci package: pip install "locus-sdk[oci]"`.
+  provider needs the requests package: pip install "locus-sdk[oci]"`. With
+  `requests` installed and the OCI SDK not, the package still imports, and
+  the same message names `oci` where the SDK is first used.
   `OpenAIModel`, `OCIChatCompletionsModel` and `AnthropicModel` name their
   extra the same way when their client package is missing. It is still a
   `ModuleNotFoundError`, so `except ImportError` callers are unaffected.
