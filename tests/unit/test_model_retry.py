@@ -357,3 +357,38 @@ async def test_unclassified_failure_is_retried_when_opted_in(sleeps: list[float]
     assert [r.reason for r in _retries(events)] == ["unknown"]
     assert model.call_count == 2
     assert sleeps == [1.0]
+
+
+class _HostRetries:
+    """A model whose host has already retried the call it reports as failed."""
+
+    handles_retries = True
+
+    def __init__(self, inner: FunctionModel) -> None:
+        self._inner = inner
+
+    async def complete(self, messages: Any, tools: Any = None, **kwargs: Any) -> Any:
+        return await self._inner.complete(messages, tools, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "policy",
+    [True, ModelRetryConfig(retry_unclassified=True)],
+    ids=["default", "retry-unclassified"],
+)
+@pytest.mark.parametrize(
+    "failure",
+    [FakeHTTPError(429, "Too Many Requests"), ValueError("the host gave up")],
+    ids=["rate-limit", "unclassified"],
+)
+async def test_a_model_whose_host_retries_is_called_once(
+    sleeps: list[float], policy: Any, failure: BaseException
+) -> None:
+    inner = _failing_then(failure)
+    agent = _agent(_HostRetries(inner), model_retry=policy)
+
+    events = await _events_until(agent, type(failure))
+
+    assert not _retries(events)
+    assert inner.call_count == 1
+    assert sleeps == []

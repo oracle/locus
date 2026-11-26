@@ -61,6 +61,25 @@ ARUN_RESULT_SLOT: contextvars.ContextVar[ResultSlot | None] = contextvars.Contex
 )
 
 
+#: Whether the streamed model call in progress has its content chunks held.
+_ANSWER_TOKENS_HELD: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "locus_answer_tokens_held", default=False
+)
+
+
+def answer_tokens_held() -> bool:
+    """Whether the loop is holding the content of the model call in progress.
+
+    ``True`` inside ``model.stream()`` when the agent runs with a
+    ``final_answer_verifier`` and ``hold_final_answer_tokens``: the loop keeps
+    that call's content chunks back until it knows they are not a draft the
+    verifier sends back. A model that also shows its chunks to someone itself,
+    outside the loop's event stream, reads this so that it does not show a
+    draft the loop would have dropped. ``False`` everywhere else.
+    """
+    return _ANSWER_TOKENS_HELD.get()
+
+
 #: Run-metadata keys that are carried for the run but never persisted.
 #: ``mcp_headers`` holds per-run MCP request headers — typically the end
 #: user's bearer token — so it must never reach the checkpoint, the event

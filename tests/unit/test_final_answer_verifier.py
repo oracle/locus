@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from locus.agent import Agent
+from locus.agent import Agent, answer_tokens_held
 from locus.agent.verification import (
     EPHEMERAL_MESSAGE_KEY,
     FinalAnswerContext,
@@ -253,6 +253,45 @@ async def test_hold_drops_the_rejected_draft_and_releases_the_accepted_one() -> 
     first_chunk = min(i for i, k in enumerate(kinds) if k == "ModelChunkEvent")
     assert first_chunk > last_verdict
     assert kinds[-1] == "TerminateEvent"
+
+
+class _SeesTheHold:
+    """A model that records, inside each call, whether its content is held."""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+        self.seen: list[bool] = []
+
+    async def complete(self, messages: Any, tools: Any = None, **kwargs: Any) -> Any:
+        self.seen.append(answer_tokens_held())
+        return await self._inner.complete(messages, tools, **kwargs)
+
+    async def stream(self, messages: Any, tools: Any = None, **kwargs: Any) -> Any:
+        self.seen.append(answer_tokens_held())
+        async for chunk in self._inner.stream(messages, tools, **kwargs):
+            yield chunk
+
+
+async def test_a_model_can_see_that_its_content_is_held() -> None:
+    model = _SeesTheHold(ScriptedModel([text("WRONG draft"), text("good answer")]))
+    agent = _agent(model, _Verifier(), hold_final_answer_tokens=True)
+    await _collect(agent.run("q", stream_tokens=True))
+
+    assert model.seen == [True, True]
+    assert answer_tokens_held() is False  # only inside the call
+
+
+@pytest.mark.parametrize(
+    ("hold", "stream_tokens"), [(False, True), (True, False)], ids=["no-hold", "no-stream"]
+)
+async def test_content_is_not_reported_held_when_nothing_holds_it(
+    hold: bool, stream_tokens: bool
+) -> None:
+    model = _SeesTheHold(ScriptedModel([text("good answer")]))
+    agent = _agent(model, _Verifier(), hold_final_answer_tokens=hold)
+    await _collect(agent.run("q", stream_tokens=stream_tokens))
+
+    assert model.seen == [False]
 
 
 async def test_hold_releases_tool_steps_and_exhausted_drafts() -> None:

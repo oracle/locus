@@ -48,6 +48,24 @@ no_retry = Agent(model="{{ locus_example_model }}", model_retry=False)
 
 `model_retry=True` restores the defaults.
 
+### A model whose host already retries
+
+Some models are a call into something that retries on its own: a
+durable-execution Activity with a retry policy, or a gateway that fails over
+before it answers. When such a call finally fails, the host has given up, and a
+second retry loop around it would start the whole sequence again. A model
+class says so with one attribute:
+
+```python
+class HostedModel:
+    handles_retries = True   # the loop makes one attempt per call
+
+    async def complete(self, messages, tools=None, **kwargs): ...
+```
+
+The loop then calls the model once per step and `model_retry` does not apply
+to it, whatever its settings. The retry policy lives in one place: the host.
+
 ## Empty responses — `ModelRetryHook`
 
 The loop-level retry acts on a call that fails. A call that returns
