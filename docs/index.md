@@ -24,7 +24,7 @@ One `Agent` class, eight ways to combine agents, Oracle Cloud underneath. Around
 [GitHub](https://github.com/oracle/locus){ .md-button }
 
 ```bash
-pip install "locus-sdk[oracledb]"
+pip install "locus-sdk[oci,oracledb]"
 ```
 
 Built inside Oracle · Open source (<span class="locus-nowrap">UPL-1.0</span>)
@@ -96,7 +96,7 @@ setup.
 `locus codex` puts the skill where Codex looks and starts Codex with the sandbox settings it needs. Codex itself can run on OCI Generative AI through a loopback gateway in the repository, so neither Codex nor the agent it builds needs an account outside Oracle Cloud.
 
 ```bash
-pip install locus-sdk
+pip install "locus-sdk[oci]"
 locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
 ```
 

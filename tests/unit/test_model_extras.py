@@ -3,17 +3,14 @@
 # https://oss.oracle.com/licenses/upl/
 """A provider whose package is missing says what to install.
 
-OCI and OpenAI come with ``pip install locus-sdk``; the other providers are
-extras. Either way an install can lack a provider's package (``--no-deps``, a
-trimmed image), and the error then has to name the fix, not a module.
+Model providers are extras, so ``pip install locus-sdk`` alone has no provider
+client. The error for that has to name the fix, not a module.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import sys
-import tomllib
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -21,18 +18,6 @@ import pytest
 from locus.models import registry
 from locus.models._extras import missing_extra, require_packages
 from locus.models.registry import get_model, list_providers
-
-
-def test_oci_and_openai_are_core_dependencies() -> None:
-    project = tomllib.loads(
-        (Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8")
-    )["project"]
-    core = {
-        requirement.split(">")[0].split("=")[0].strip() for requirement in project["dependencies"]
-    }
-    assert {"oci", "openai", "requests"} <= core
-    # The extras stay, so requirements that name them keep installing.
-    assert {"oci", "openai"} <= project["optional-dependencies"].keys()
 
 
 def test_missing_extra_names_the_package_and_the_install_command() -> None:

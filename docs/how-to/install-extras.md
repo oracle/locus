@@ -6,12 +6,12 @@ description: "Which pip extra enables which part of the SDK: model providers, se
 # Install extras
 
 The base install carries the agent loop, the tools, the event bus, the control
-layer, the file and in-memory backends, and the OCI Generative AI and OpenAI
-model providers. Every other service client and database driver is an extra,
-so an environment holds only the clients it uses. Extras combine on one line:
+layer and the file and in-memory backends; every service client and database
+driver is an extra, so an environment holds only the clients it uses. Extras
+combine on one line:
 
 ```bash
-python -m pip install "locus-sdk[redis,pgvector]"
+python -m pip install "locus-sdk[oci,redis,pgvector]"
 ```
 
 Each table names the extra, what it enables, and the packages it adds.
@@ -20,9 +20,9 @@ Each table names the extra, what it enables, and the packages it adds.
 
 | Extra | Enables | Packages |
 |---|---|---|
-| `openai` | Included in the base install; the extra remains for requirements that name it. OpenAI, and every OpenAI-compatible route: OpenRouter, Together, RunPod, Ollama, vLLM, LM Studio, llama.cpp and any `base_url=` | `openai` |
+| `openai` | OpenAI, and every OpenAI-compatible route: OpenRouter, Together, RunPod, Ollama, vLLM, LM Studio, llama.cpp and any `base_url=` | `openai` |
 | `anthropic` | Anthropic | `anthropic` |
-| `oci` | Included in the base install; the extra remains for requirements that name it. OCI Generative AI on both transports; the chat-completions transport runs on the OpenAI client and the request signer on `requests` | `oci`, `openai`, `requests` |
+| `oci` | OCI Generative AI on both transports; the chat-completions transport runs on the OpenAI client and the request signer on `requests` | `oci`, `openai`, `requests` |
 | `gemini` | Gemini Live realtime voice sessions (`locus.voice`); Gemini chat models go through the OpenAI-compatible route | `google-genai` |
 | `llm` | Every provider above in one line | `openai`, `anthropic`, `oci`, `requests` |
 

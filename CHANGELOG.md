@@ -8,27 +8,19 @@ policy.
 
 ## [Unreleased]
 
-### Changed
-
-- **`pip install locus-sdk` includes the OCI Generative AI and OpenAI
-  providers.** `oci`, `openai` and `requests` are core dependencies now.
-  Before, a plain install answered `get_model("oci:...")` with "Unknown
-  provider: oci" and the first call of an `openai:` model with "No module
-  named 'openai'", although OCI is the provider the documentation leads with.
-  The install grows from about 18 MB to about 320 MB, nearly all of it the
-  OCI SDK. The `oci` and `openai` extras remain, so requirements that name
-  `locus-sdk[oci]` install as before.
-
 ### Fixed
 
-- **A provider whose package is missing says what to install.** With
-  `--no-deps` or a trimmed image the OCI provider's packages can still be
-  absent. `oci` then stays in `list_providers()`, and `get_model("oci:...")`
-  and `import locus.models.providers.oci` raise `ModuleNotFoundError: The OCI
-  provider needs the requests package: pip install "locus-sdk[oci]"` instead
-  of "Unknown provider: oci" and "No module named 'requests'". `OpenAIModel`,
-  `OCIChatCompletionsModel` and `AnthropicModel` name their extra the same
-  way when their client package is missing.
+- **A provider whose package is missing says what to install.** Model
+  providers are extras, so `pip install locus-sdk` alone has no provider
+  client, and the errors for that named a module or denied the provider:
+  `get_model("oci:...")` answered "Unknown provider: oci", `import
+  locus.models.providers.oci` "No module named 'requests'", and the first
+  call of an `openai:` model "No module named 'openai'". `oci` now stays in
+  `list_providers()`, and both OCI paths raise `ModuleNotFoundError: The OCI
+  provider needs the oci package: pip install "locus-sdk[oci]"`.
+  `OpenAIModel`, `OCIChatCompletionsModel` and `AnthropicModel` name their
+  extra the same way when their client package is missing. It is still a
+  `ModuleNotFoundError`, so `except ImportError` callers are unaffected.
 
 ## [6.8.0] - 2026-11-26
 

@@ -35,7 +35,7 @@
 ## Your first agent
 
 ```bash
-pip install "locus-sdk[oracledb]"
+pip install "locus-sdk[oci,oracledb]"
 export OCI_PROFILE=DEFAULT   # a profile in ~/.oci/config with Generative AI access
 ```
 
@@ -163,9 +163,8 @@ agent = Agent(model="oci:openai.gpt-5.5", tools=[retriever.as_tool()])
 | **[Skills](https://locusagents.ai/concepts/skills/), [playbooks](https://locusagents.ai/concepts/playbooks/), [evaluation](https://locusagents.ai/concepts/evaluation/), [testing](https://locusagents.ai/concepts/testing/)** | Progressive-disclosure skills, enforced playbooks, `EvalCase` / `EvalRunner` / `EvalReport` regression suites; `locus.testing` model doubles (`ScriptedModel`, `FunctionModel`) and `AgentTestClient` for deterministic tests with no API key. |
 | **[Model providers](https://locusagents.ai/how-to/configure-providers/)** | `oci:`, `openai:`, `anthropic:` native; `gemini:`, `openrouter:`, `together:`, `runpod:`, `groq:`, `ollama:`, `vllm:` and 11 more OpenAI-compatible routes; failover chains, credential pooling, prompt-cache breakpoints. |
 
-`pip install locus-sdk` brings the OCI Generative AI and OpenAI model providers. Every other
-backend is an optional extra — install only what you use: `pip install "locus-sdk[oracledb]"`
-for the Oracle Database stores, `[oci-sandbox]` for OCI GenAI Sandboxes, `[openshell]` for NVIDIA OpenShell,
+Every backend is an optional extra — install only what you use: `pip install "locus-sdk[oci,oracledb]"`
+for the Oracle stack, `[oci-sandbox]` for OCI GenAI Sandboxes, `[openshell]` for NVIDIA OpenShell,
 `[server]` for `AgentServer`, `[mcp]` for MCP, `[qdrant,s3,rerank-local]` and the other extras in
 `pyproject.toml` as needed. A coding agent in an OCI GenAI Sandbox is one backend away from the
 same harness that runs on your laptop:
@@ -230,7 +229,7 @@ profile, or the bundled mock model without one.
 
 ```bash
 git clone https://github.com/oracle/locus.git
-cd locus && pip install -e ".[oracledb]"
+cd locus && pip install -e ".[oci,oracledb]"
 
 python examples/notebook_01_oci_transports.py        # the three OCI GenAI transports
 python examples/notebook_02_basic_agent.py           # your first agent
@@ -263,7 +262,7 @@ the coding harness, the providers, and how to test an agent offline. `locus code
 where Codex looks and starts Codex with the sandbox settings it needs:
 
 ```bash
-pip install locus-sdk
+pip install "locus-sdk[oci]"
 locus codex run "Build a support agent with an order lookup and a gated refund tool, with tests"
 ```
 
