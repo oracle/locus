@@ -1779,6 +1779,13 @@ class OpenAIModel(BaseModel):
 
         # Track tool calls during streaming
         current_tool_calls: dict[int, dict[str, Any]] = {}
+        # Which accumulated call a stream index is feeding right now. A delta
+        # names its call by ``index``; some OpenAI-compatible servers give
+        # every parallel call the same index, and telling calls apart by index
+        # alone then joins them into one (the last name, every call's
+        # arguments end to end, which is no longer JSON). A delta that carries
+        # a different call id on an index already in use starts a new call.
+        slot_of_index: dict[int, int] = {}
 
         stream = await self.client.chat.completions.create(**request_kwargs)
 
@@ -1845,21 +1852,26 @@ class OpenAIModel(BaseModel):
             # Handle tool calls
             if delta is not None and delta.tool_calls:
                 for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in current_tool_calls:
-                        current_tool_calls[idx] = {
+                    slot = slot_of_index.get(tc_delta.index)
+                    known_id = current_tool_calls[slot]["id"] if slot is not None else ""
+                    if slot is None or (tc_delta.id and known_id and tc_delta.id != known_id):
+                        # First delta on this index, or another call's first
+                        # delta on an index a server reused.
+                        slot = len(current_tool_calls)
+                        slot_of_index[tc_delta.index] = slot
+                        current_tool_calls[slot] = {
                             "id": tc_delta.id or "",
                             "name": "",
                             "arguments": "",
                         }
 
                     if tc_delta.id:
-                        current_tool_calls[idx]["id"] = tc_delta.id
+                        current_tool_calls[slot]["id"] = tc_delta.id
                     if tc_delta.function:
                         if tc_delta.function.name:
-                            current_tool_calls[idx]["name"] = tc_delta.function.name
+                            current_tool_calls[slot]["name"] = tc_delta.function.name
                         if tc_delta.function.arguments:
-                            current_tool_calls[idx]["arguments"] += tc_delta.function.arguments
+                            current_tool_calls[slot]["arguments"] += tc_delta.function.arguments
 
             # Check for end of stream
             if choice.finish_reason:

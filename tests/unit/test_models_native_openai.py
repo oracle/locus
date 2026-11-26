@@ -615,6 +615,54 @@ class TestStream:
         assert tc.arguments == {"q": "hi"}
 
     @pytest.mark.asyncio
+    async def test_parallel_calls_on_one_index_are_told_apart_by_id(self) -> None:
+        # Some OpenAI-compatible servers give every parallel call index 0.
+        # Keyed by index alone the two calls became one: the last name, and
+        # ``{"path": "repo"}{"pattern": "**/*", "path": "repo"}`` as arguments,
+        # which is not JSON, so the call was malformed and nothing ran.
+        def piece(**kw: Any) -> _Chunk:
+            return _Chunk(choices=[_ChunkChoice(delta=_Delta(tool_calls=[_ToolDelta(**kw)]))])
+
+        chunks = [
+            piece(index=0, call_id="call_a", name="ls"),
+            piece(index=0, arguments='{"path": "repo"}'),
+            piece(index=0, call_id="call_b", name="glob"),
+            piece(index=0, arguments='{"pattern": "**/*",'),
+            piece(index=0, arguments=' "path": "repo"}'),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="tool_calls")]),
+        ]
+        m = _model_with(_client_with(stream_chunks=chunks))
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        calls = [tc for ev in events if ev.tool_calls for tc in ev.tool_calls]
+        assert [(tc.id, tc.name, tc.arguments) for tc in calls] == [
+            ("call_a", "ls", {"path": "repo"}),
+            ("call_b", "glob", {"pattern": "**/*", "path": "repo"}),
+        ]
+        assert all(tc.malformed_arguments is None for tc in calls)
+
+    @pytest.mark.asyncio
+    async def test_a_call_whose_id_is_repeated_on_every_delta_stays_one_call(self) -> None:
+        # The id on every delta (some servers do) is the same call, not a new one;
+        # and calls on their own indexes are unaffected.
+        def piece(**kw: Any) -> _Chunk:
+            return _Chunk(choices=[_ChunkChoice(delta=_Delta(tool_calls=[_ToolDelta(**kw)]))])
+
+        chunks = [
+            piece(index=0, call_id="call_a", name="search"),
+            piece(index=0, call_id="call_a", arguments='{"q":'),
+            piece(index=1, call_id="call_b", name="read", arguments='{"path": "x"}'),
+            piece(index=0, call_id="call_a", arguments=' "hi"}'),
+            _Chunk(choices=[_ChunkChoice(delta=_Delta(), finish_reason="tool_calls")]),
+        ]
+        m = _model_with(_client_with(stream_chunks=chunks))
+        events = [ev async for ev in m.stream([Message.user("hi")])]
+        calls = [tc for ev in events if ev.tool_calls for tc in ev.tool_calls]
+        assert [(tc.id, tc.name, tc.arguments) for tc in calls] == [
+            ("call_a", "search", {"q": "hi"}),
+            ("call_b", "read", {"path": "x"}),
+        ]
+
+    @pytest.mark.asyncio
     async def test_malformed_tool_arguments_become_empty(self) -> None:
         chunks = [
             _Chunk(

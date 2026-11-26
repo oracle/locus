@@ -8,6 +8,17 @@ policy.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Parallel tool calls on one stream index are no longer joined into one.** A
+  streamed delta names its call by `index`, and `OpenAIModel.stream`
+  accumulated by index alone. Some OpenAI-compatible servers give every
+  parallel call index 0; the calls then came out as one `ToolCall` with the
+  last call's name and id and every call's arguments end to end
+  (`{"path": "repo"}{"pattern": "**/*", "path": "repo"}`), which is not JSON,
+  so `malformed_arguments` was set and nothing ran. A delta that carries a
+  different call id on an index already in use now starts a new call.
+
 ## [6.8.0] - 2026-11-26
 
 ### Added
