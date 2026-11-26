@@ -8,6 +8,8 @@ policy.
 
 ## [Unreleased]
 
+## [6.8.1] - 2026-11-26
+
 ### Fixed
 
 - **Parallel tool calls on one stream index are no longer joined into one.** A
