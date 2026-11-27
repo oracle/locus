@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from locus.core.loop_bound import loop_bound
+from locus.models.providers.oci._requirements import require_oci_sdk
 
 
 if TYPE_CHECKING:
@@ -121,6 +122,7 @@ class OCIClient:
             ):
                 self._oci_config = {}
             else:
+                require_oci_sdk()
                 from oci import config as oci_config_module
 
                 config_path = Path(self.config.config_file).expanduser()
@@ -159,6 +161,7 @@ class OCIClient:
 
     def _create_client(self) -> GenerativeAiInferenceClient:
         """Create the OCI GenAI client based on auth type."""
+        require_oci_sdk()
         from oci.generative_ai_inference import GenerativeAiInferenceClient
 
         auth_type = self.config.auth_type

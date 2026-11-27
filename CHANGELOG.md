@@ -12,6 +12,20 @@ policy.
 
 ### Fixed
 
+- **A provider whose package is missing says what to install.** Model
+  providers are extras, so `pip install locus-sdk` alone has no provider
+  client, and the errors for that named a module or denied the provider:
+  `get_model("oci:...")` answered "Unknown provider: oci", `import
+  locus.models.providers.oci` "No module named 'requests'", and the first
+  call of an `openai:` model "No module named 'openai'". `oci` now stays in
+  `list_providers()`, and both OCI paths raise `ModuleNotFoundError: The OCI
+  provider needs the requests package: pip install "locus-sdk[oci]"`. With
+  `requests` installed and the OCI SDK not, the package still imports, and
+  the same message names `oci` where the SDK is first used.
+  `OpenAIModel`, `OCIChatCompletionsModel` and `AnthropicModel` name their
+  extra the same way when their client package is missing. It is still a
+  `ModuleNotFoundError`, so `except ImportError` callers are unaffected.
+
 - **Parallel tool calls on one stream index are no longer joined into one.** A
   streamed delta names its call by `index`, and `OpenAIModel.stream`
   accumulated by index alone. Some OpenAI-compatible servers give every

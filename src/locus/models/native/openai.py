@@ -27,6 +27,7 @@ from locus.core.media import (
     strip_images,
 )
 from locus.core.messages import Message, Role, ToolCall
+from locus.models._extras import missing_extra
 from locus.models.base import ModelConfig, ModelResponse
 
 
@@ -757,7 +758,10 @@ class OpenAIModel(BaseModel):
         """
 
         def build() -> openai.AsyncOpenAI:
-            import openai  # noqa: PLC0415
+            try:
+                import openai  # noqa: PLC0415
+            except ModuleNotFoundError as exc:
+                raise missing_extra("OpenAIModel", "openai", exc.name) from exc
 
             http_kwargs: dict[str, Any] = {}
             if not self.config.keepalive:
